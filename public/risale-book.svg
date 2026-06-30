@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="420" viewBox="0 0 320 420" role="img" aria-label="Risale book">
+  <defs>
+    <linearGradient id="cover2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f766e"/>
+      <stop offset="100%" stop-color="#14b8a6"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="16" width="272" height="388" rx="18" fill="url(#cover2)"/>
+  <rect x="36" y="30" width="248" height="360" rx="12" fill="none" stroke="#ccfbf1" stroke-width="4" opacity="0.85"/>
+  <rect x="96" y="132" width="128" height="156" rx="10" fill="none" stroke="#f0fdfa" stroke-width="5" opacity="0.95"/>
+  <path d="M116 172h88M116 202h88M116 232h88" stroke="#f0fdfa" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
+</svg>
