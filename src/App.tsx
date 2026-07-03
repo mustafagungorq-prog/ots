@@ -23,6 +23,8 @@ import { UsersPage } from './app/pages/UsersPage.tsx';
 import { SurveyManagementPage } from './app/pages/SurveyManagementPage.tsx';
 import { StudentProfilePage } from './app/pages/StudentProfilePage.tsx';
 import { HomeworkTemplatesPage } from './app/pages/HomeworkTemplatesPage.tsx';
+import { MemorizationTrackingPage } from './app/pages/MemorizationTrackingPage.tsx';
+import { MemorizationTextsAdminPage } from './app/pages/MemorizationTextsAdminPage.tsx';
 
 function AppRouter() {
   const { currentUser } = useAuth();
@@ -32,6 +34,14 @@ function AppRouter() {
   useEffect(() => {
     if (!currentUser) return;
     const role = currentUser.role;
+    if (role === 'parent') {
+      const target = `/student-profile/${currentUser.linkedStudentIds?.[0] ?? 0}`;
+      if (location.pathname !== target) {
+        navigate(target, { replace: true });
+      }
+      return;
+    }
+
     if (role === 'teacher') {
       if (!location.pathname.startsWith('/progress') && !location.pathname.startsWith('/student-profile')) {
         navigate('/progress', { replace: true });
@@ -53,9 +63,11 @@ function AppRouter() {
             ? <DashboardPage />
             : currentUser.role === 'authorized_teacher' || currentUser.role === 'teacher'
               ? <Navigate to="/progress" replace />
-              : <Navigate to="/students" replace />
+              : currentUser.role === 'parent'
+                ? <Navigate to={`/student-profile/${currentUser.linkedStudentIds?.[0] ?? 0}`} replace />
+                : <Navigate to="/students" replace />
         } />
-        <Route path="/students" element={<AuthGuard requiredRoles={['superadmin', 'admin', 'authorized_teacher', 'parent']}><StudentsPage /></AuthGuard>} />
+        <Route path="/students" element={<AuthGuard requiredRoles={['superadmin', 'admin', 'authorized_teacher']}><StudentsPage /></AuthGuard>} />
         <Route path="/student-form" element={<AuthGuard requiredRoles={PERMISSIONS.STUDENT_CREATE}><StudentFormPage /></AuthGuard>} />
         <Route path="/student-form/:id" element={<AuthGuard requiredRoles={PERMISSIONS.STUDENT_EDIT}><StudentFormPage /></AuthGuard>} />
         <Route path="/schools" element={<AuthGuard requiredRoles={PERMISSIONS.SCHOOL_MANAGE}><SchoolsPage /></AuthGuard>} />
@@ -70,7 +82,9 @@ function AppRouter() {
         <Route path="/users" element={<AuthGuard requiredRoles={PERMISSIONS.USER_MANAGE}><UsersPage /></AuthGuard>} />
         <Route path="/surveys" element={<AuthGuard requiredRoles={['superadmin', 'admin']}><SurveyManagementPage /></AuthGuard>} />
         <Route path="/homework-templates" element={<AuthGuard requiredRoles={['superadmin', 'admin']}><HomeworkTemplatesPage /></AuthGuard>} />
-        <Route path="/student-profile/:id" element={<StudentProfilePage />} />
+        <Route path="/memorization-tracking" element={<AuthGuard requiredRoles={PERMISSIONS.MEMORIZATION_TRACK}><MemorizationTrackingPage /></AuthGuard>} />
+        <Route path="/memorization-texts-admin" element={<AuthGuard requiredRoles={['superadmin', 'admin']}><MemorizationTextsAdminPage /></AuthGuard>} />
+        <Route path="/student-profile/:id" element={<AuthGuard requiredRoles={['superadmin', 'admin', 'authorized_teacher', 'teacher', 'parent']}><StudentProfilePage /></AuthGuard>} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </MainLayout>

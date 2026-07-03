@@ -64,7 +64,16 @@ export function ReportsPage() {
   const [preview, setPreview] = useState('');
   const [showPreview, setShowPreview] = useState(false);
   const grades = useMemo(() => Array.from(new Set(data.students.map(s => s.grade))).sort(), [data.students]);
-  const filteredStudents = useMemo(() => data.students.filter(s => (!selLesson || s.lessons.includes(Number(selLesson))) && (!selGrade || s.grade === selGrade)), [selLesson, selGrade, data.students]);
+  const filteredStudents = useMemo(() => {
+    const lessonFilterActive = !!selLesson;
+    const lessonId = lessonFilterActive ? Number(selLesson) : null;
+    const gradeFilterActive = !!selGrade;
+    return data.students.filter(s => {
+      if (lessonFilterActive && lessonId && !s.lessons.includes(lessonId)) return false;
+      if (gradeFilterActive && s.grade !== selGrade) return false;
+      return true;
+    });
+  }, [selLesson, selGrade, data.students]);
   const generateReport = () => {
     if (!selStudent) return;
     const st = data.students.find(s => s.id === Number(selStudent)); if (!st) return;
@@ -81,17 +90,31 @@ export function ReportsPage() {
     if (!selStudent || !preview) return;
     const now = new Date().toISOString().split('T')[0];
     const start = reportType === 'daily' ? now : reportType === 'weekly' ? new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0] : new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0];
-    data.addReport({ studentId: Number(selStudent), type: reportType, periodStart: start, periodEnd: now, content: preview, sentVia: sendVia as ('email' | 'sms')[] });
+    const sentViaForApi = sendVia.includes('email') && sendVia.includes('sms')
+      ? 'both'
+      : (sendVia.includes('sms') ? 'sms' : 'email');
+    data.addReport({ studentId: Number(selStudent), type: reportType, periodStart: start, periodEnd: now, content: preview, sentVia: sentViaForApi });
     setShowPreview(false); setPreview('');
   };
   const toggleSendVia = (m: string) => setSendVia(p => p.includes(m) ? p.filter(x => x !== m) : [...p, m]);
+  const getSendViaLabel = (r: any) => {
+    const value = r?.sentVia ?? r?.sent_via;
+    if (Array.isArray(value)) return value.join(' + ').toUpperCase();
+    if (typeof value === 'string') {
+      if (value === 'both') return 'EMAIL + SMS';
+      if (value.includes(',')) return value.split(',').map((x: string) => x.trim().toUpperCase()).join(' + ');
+      return value.toUpperCase();
+    }
+    return '-';
+  };
+  const getReportDate = (r: any) => r?.sentAt || r?.createdAt || r?.created_at || '-';
   return (
     <div className="space-y-6">
       <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Raporlar</h2>
       <Card><CardHeader className="pb-3"><CardTitle className="text-base flex items-center gap-2"><FileText size={18} /> Gelişim Raporu</CardTitle></CardHeader><CardContent className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="space-y-1"><Label className="text-xs">Ders Filtresi</Label><Select value={selLesson} onValueChange={v => { setSelLesson(v); setSelStudent(''); }}><SelectTrigger><SelectValue placeholder="Ders (opsiyonel)" /></SelectTrigger><SelectContent><SelectItem value="all">Tümü</SelectItem>{data.lessons.map(l => <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>)}</SelectContent></Select></div>
-          <div className="space-y-1"><Label className="text-xs">Sınıf Filtresi</Label><Select value={selGrade} onValueChange={v => { setSelGrade(v); setSelStudent(''); }}><SelectTrigger><SelectValue placeholder="Sınıf (opsiyonel)" /></SelectTrigger><SelectContent><SelectItem value="all">Tümü</SelectItem>{grades.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent></Select></div>
+          <div className="space-y-1"><Label className="text-xs">Ders Filtresi</Label><Select value={selLesson || 'all'} onValueChange={v => { setSelLesson(v === 'all' ? '' : v); setSelStudent(''); }}><SelectTrigger><SelectValue placeholder="Ders (opsiyonel)" /></SelectTrigger><SelectContent><SelectItem value="all">Tümü</SelectItem>{data.lessons.map(l => <SelectItem key={l.id} value={String(l.id)}>{l.name}</SelectItem>)}</SelectContent></Select></div>
+          <div className="space-y-1"><Label className="text-xs">Sınıf Filtresi</Label><Select value={selGrade || 'all'} onValueChange={v => { setSelGrade(v === 'all' ? '' : v); setSelStudent(''); }}><SelectTrigger><SelectValue placeholder="Sınıf (opsiyonel)" /></SelectTrigger><SelectContent><SelectItem value="all">Tümü</SelectItem>{grades.map(g => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent></Select></div>
           <div className="space-y-1"><Label className="text-xs">Öğrenci</Label><Select value={selStudent} onValueChange={setSelStudent}><SelectTrigger><SelectValue placeholder="Öğrenci seçin" /></SelectTrigger><SelectContent>{(selLesson || selGrade ? filteredStudents : data.students).map(s => <SelectItem key={s.id} value={String(s.id)}>{s.firstName} {s.lastName} ({s.grade})</SelectItem>)}</SelectContent></Select></div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -109,10 +132,10 @@ export function ReportsPage() {
         {canViewColumn('reports', 'status') && <TableHead className="text-xs">Durum</TableHead>}
         {canViewColumn('reports', 'actions') && <TableHead className="text-xs">İşlem</TableHead>}
       </TableRow></TableHeader><TableBody>{data.reports.slice().reverse().map(r => { const s = data.students.find(x => x.id === r.studentId); return <TableRow key={r.id}>
-        {canViewColumn('reports', 'date') && <TableCell className="text-xs">{r.sentAt}</TableCell>}
+        {canViewColumn('reports', 'date') && <TableCell className="text-xs">{getReportDate(r)}</TableCell>}
         {canViewColumn('reports', 'student') && <TableCell className="font-medium text-xs">{s?.firstName} {s?.lastName}</TableCell>}
         {canViewColumn('reports', 'type') && <TableCell className="text-xs">{r.type === 'daily' ? 'Günlük' : r.type === 'weekly' ? 'Haftalık' : 'Aylık'}</TableCell>}
-        {canViewColumn('reports', 'method') && <TableCell className="text-xs">{r.sentVia.join(' + ').toUpperCase()}</TableCell>}
+        {canViewColumn('reports', 'method') && <TableCell className="text-xs">{getSendViaLabel(r)}</TableCell>}
         {canViewColumn('reports', 'status') && <TableCell><Badge variant={r.status === 'sent' ? 'default' : 'outline'} className="text-xs">{r.status === 'sent' ? 'Gönderildi' : 'Taslak'}</Badge></TableCell>}
         {canViewColumn('reports', 'actions') && <TableCell><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => data.deleteReport(r.id)}><Trash2 size={14} className="text-red-500" /></Button></TableCell>}
       </TableRow>; })}{data.reports.length === 0 && <TableRow><TableCell colSpan={6} className="text-center py-8 text-gray-500">Henüz rapor yok</TableCell></TableRow>}</TableBody></Table></CardContent></Card>

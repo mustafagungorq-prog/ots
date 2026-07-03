@@ -55,7 +55,7 @@ function getMonthName(key: string) {
 // ====== CLASSES PAGE ======
 export function ClassesPage() {
   const data = useStudentData();
-  const { users } = useAuth();
+  const { users, canEdit } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ClassRoom | null>(null);
@@ -68,6 +68,14 @@ export function ClassesPage() {
   const [transferAssignLessons, setTransferAssignLessons] = useState(true);
   const [lessonAddOpen, setLessonAddOpen] = useState<{ roomId: number; lessonId: number } | null>(null);
   const [lessonAddSelected, setLessonAddSelected] = useState<number[]>([]);
+
+  const goStudentPage = (studentId: number) => {
+    navigate(canEdit ? `/student-form/${studentId}` : `/student-profile/${studentId}`);
+  };
+
+  const getTeacherDisplayName = (teacher: any) => {
+    return teacher?.fullName || teacher?.full_name || teacher?.username || 'Öğretmen';
+  };
 
   const handleSubmit = () => {
     if (!form.name || !form.grade) return;
@@ -162,8 +170,8 @@ export function ClassesPage() {
                                 <div className="space-y-1">
                                   {lessonStudents.map(s => (
                                     <div key={s.id} className="flex items-center gap-2 p-2 bg-gray-50 rounded">
-                                      <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xs font-bold cursor-pointer" onClick={() => navigate(`/student-profile/${s.id}`)}>{s.firstName[0]}{s.lastName[0]}</div>
-                                      <span className="text-sm flex-1 cursor-pointer" onClick={() => navigate(`/student-profile/${s.id}`)}>{s.firstName} {s.lastName}</span>
+                                      <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xs font-bold cursor-pointer" onClick={() => goStudentPage(s.id)}>{s.firstName[0]}{s.lastName[0]}</div>
+                                      <span className="text-sm flex-1 cursor-pointer" onClick={() => goStudentPage(s.id)}>{s.firstName} {s.lastName}</span>
                                       <Button variant="ghost" size="sm" className="h-7 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50" onClick={() => { if (confirm(`${s.firstName} ${s.lastName} bu dersten çıkarılsın mı?`)) data.updateStudent(s.id, { lessons: s.lessons.filter(lid => lid !== lesson.id) }); }}>
                                         <X size={12} className="mr-1" /> Çıkar
                                       </Button>
@@ -223,7 +231,7 @@ export function ClassesPage() {
                           const t = users.find(u => u.id === tid);
                           return t ? (
                             <Badge key={tid} className="bg-purple-100 text-purple-700 border-purple-300 text-xs flex items-center gap-1">
-                              <GraduationCap size={12} /> {t.username}
+                              <GraduationCap size={12} /> {getTeacherDisplayName(t)}
                               <button onClick={() => data.unassignTeacherFromClassRoom(room.id, tid)} className="ml-1 text-purple-400 hover:text-red-500">×</button>
                             </Badge>
                           ) : null;
@@ -237,7 +245,7 @@ export function ClassesPage() {
                           <Select onValueChange={v => { if (v) data.assignTeacherToClassRoom(room.id, Number(v)); }}>
                             <SelectTrigger className="w-56 h-8 text-xs"><SelectValue placeholder="Öğretmen ekle..." /></SelectTrigger>
                             <SelectContent>
-                              {unassignedTeachers.map(t => <SelectItem key={t.id} value={String(t.id)}>{t.fullName} ({t.role === 'authorized_teacher' ? 'Yetkili Öğr.' : 'Öğretmen'})</SelectItem>)}
+                              {unassignedTeachers.map(t => <SelectItem key={t.id} value={String(t.id)}>{getTeacherDisplayName(t)} ({t.role === 'authorized_teacher' ? 'Yetkili Öğr.' : 'Öğretmen'})</SelectItem>)}
                             </SelectContent>
                           </Select>
                         );
@@ -251,8 +259,8 @@ export function ClassesPage() {
                         <div className="space-y-2">
                           {roomStudents.map(s => (
                             <div key={s.id} className="flex items-center gap-2 p-2 bg-gray-50 rounded">
-                              <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 cursor-pointer hover:bg-emerald-700" onClick={() => navigate(`/student-profile/${s.id}`)}>{s.firstName[0]}{s.lastName[0]}</div>
-                              <div className="min-w-0 flex-1 cursor-pointer" onClick={() => navigate(`/student-profile/${s.id}`)}>
+                              <div className="w-7 h-7 rounded-full bg-emerald-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 cursor-pointer hover:bg-emerald-700" onClick={() => goStudentPage(s.id)}>{s.firstName[0]}{s.lastName[0]}</div>
+                              <div className="min-w-0 flex-1 cursor-pointer" onClick={() => goStudentPage(s.id)}>
                                 <p className="text-sm truncate">{s.firstName} {s.lastName}</p>
                                 <p className="text-[10px] text-gray-400">{s.city} • {s.age} yaş</p>
                               </div>

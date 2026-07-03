@@ -58,7 +58,7 @@ interface AuthContextType {
   clearSessionExpired: () => void;
   loading: boolean;
   error: string | null;
-  addUser: (user: Omit<User, 'id'>) => Promise<void>;
+  addUser: (user: Omit<User, 'id'>) => Promise<number | void>;
   updateUser: (id: number, data: Partial<User>) => Promise<void>;
   deleteUser: (id: number) => Promise<void>;
   changePassword: (userId: number, newPassword: string) => Promise<void>;
@@ -103,7 +103,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.user) {
           setCurrentUser(data.user);
           refreshUsers();
-          refreshTeacherLessons();
+          if (data.user.role !== 'parent') {
+            refreshTeacherLessons();
+          }
         }
       })
       .catch(() => { localStorage.removeItem('ots_token'); })
@@ -143,7 +145,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setCurrentUser(data.user);
         updateLastActivity();
         await refreshUsers();
-        await refreshTeacherLessons();
+        if (data.user.role !== 'parent') {
+          await refreshTeacherLessons();
+        }
         return true;
       }
       return false;
@@ -173,8 +177,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isNormalTeacher = currentUser?.role === 'teacher';
 
   const addUser = useCallback(async (user: Omit<User, 'id'>) => {
-    await apiPost('users', user);
+    const created = await apiPost<{ id?: number }>('users', user);
     await refreshUsers();
+    return created?.id;
   }, [refreshUsers]);
 
   const updateUser = useCallback(async (id: number, data: Partial<User>) => {

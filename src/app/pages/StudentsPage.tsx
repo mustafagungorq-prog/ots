@@ -175,6 +175,14 @@ export function StudentsPage() {
     alert(`${selectedStudents.length} öğrenci ${group.name} grubuna aktarıldı${assignLessons ? ' ve derslere atandı' : ''}`);
   };
 
+  const handleRowDoubleClick = (student: Student) => {
+    if (canEdit) {
+      navigate(`/student-form/${student.id}`, { state: { student } });
+      return;
+    }
+    setPopupStudent(student);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -214,7 +222,7 @@ export function StudentsPage() {
             const sc = data.schools.find(x => x.id === s.schoolId);
             const group = data.classRooms.find(c => c.id === s.groupId);
             const sl = data.lessons.filter(l => s.lessons.includes(l.id));
-            return <TableRow key={s.id} onDoubleClick={() => setPopupStudent(s)} className={`cursor-pointer hover:bg-blue-50 ${selectedStudents.includes(s.id) ? 'bg-emerald-50' : ''}`} title="Çift tıklayın">
+            return <TableRow key={s.id} onDoubleClick={() => handleRowDoubleClick(s)} className={`cursor-pointer hover:bg-blue-50 ${selectedStudents.includes(s.id) ? 'bg-emerald-50' : ''}`} title={canEdit ? 'Çift tıklayın: Güncelle' : 'Çift tıklayın'}>
               <TableCell onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedStudents.includes(s.id)} onChange={() => toggleSelection(s.id)} className="w-4 h-4 accent-emerald-600 cursor-pointer" /></TableCell>
               {canViewColumn('students', 'firstName') && <TableCell className="font-medium text-sm">{s.firstName} {s.lastName}</TableCell>}
               {canViewColumn('students', 'grade') && <TableCell className="text-sm">{s.grade}</TableCell>}
@@ -223,7 +231,7 @@ export function StudentsPage() {
               {canViewColumn('students', 'age') && <TableCell className="text-sm">{s.age}</TableCell>}
               {canViewColumn('students', 'city') && <TableCell className="text-sm">{s.city}</TableCell>}
               {canViewColumn('students', 'lessons') && <TableCell><div className="flex flex-wrap gap-1">{sl.slice(0, 2).map(l => <Badge key={l.id} variant="outline" className="text-[10px]">{l.name}</Badge>)}{sl.length > 2 && <span className="text-xs text-gray-400">+{sl.length - 2}</span>}</div></TableCell>}
-              {canViewColumn('students', 'actions') && <TableCell><div className="flex gap-1">{canEdit && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); navigate(`/student-form/${s.id}`); }}><Pencil size={14} /></Button>}{canDelete && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); if (confirm('Silinsin mi?')) data.deleteStudent(s.id); }}><Trash2 size={14} className="text-red-500" /></Button>}</div></TableCell>}
+              {canViewColumn('students', 'actions') && <TableCell><div className="flex gap-1">{canEdit && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); navigate(`/student-form/${s.id}`, { state: { student: s } }); }} title="Öğrenciyi güncelle"><Pencil size={14} /></Button>}{canDelete && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={e => { e.stopPropagation(); if (confirm('Silinsin mi?')) data.deleteStudent(s.id); }}><Trash2 size={14} className="text-red-500" /></Button>}</div></TableCell>}
             </TableRow>;
           })}</TableBody>
         </Table>

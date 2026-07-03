@@ -57,9 +57,13 @@ export function StudentFormPage() {
   const data = useStudentData();
   const { canViewTC } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { id } = useParams();
   const isEdit = !!id;
-  const student = isEdit ? data.students.find(s => s.id === Number(id)) : null;
+  const stateStudent = location.state?.student as Student | undefined;
+  const student = isEdit
+    ? (data.students.find(s => s.id === Number(id)) || (stateStudent?.id === Number(id) ? stateStudent : null))
+    : null;
 
   // Tüm hook'lar conditional return'dan ONCE cagrilmali
   const [activeTab, setActiveTab] = useState<'info' | 'survey'>('info');
@@ -82,10 +86,13 @@ export function StudentFormPage() {
   // Düzenleme modunda ogrenci verisi geldiginde formu ve anket cevaplarini doldur
   useEffect(() => {
     if (isEdit && student) {
+      const resolvedSchoolName =
+        student.schoolName || data.schools.find(s => s.id === student.schoolId)?.name || '';
+
       setForm({
         tcKimlik: student.tcKimlik || '', firstName: student.firstName || '', lastName: student.lastName || '',
         birthYear: student.birthYear || undefined,
-        city: student.city || '', schoolName: student.schoolName || data.schools.find(s => s.id === student.schoolId)?.name || '',
+        city: student.city || '', schoolName: resolvedSchoolName,
         grade: student.grade || '', phone: student.phone || '', parentName: student.parentName || '',
         parentPhone: student.parentPhone || '', email: student.email || '', lessons: student.lessons || [],
         groupId: student.groupId || undefined
@@ -98,7 +105,7 @@ export function StudentFormPage() {
         setSurveyAnswers(existing);
       } catch { setSurveyAnswers({}); }
     }
-  }, [isEdit, id, student?.id]);
+  }, [isEdit, id, student?.id, student?.schoolName, student?.schoolId, data.schools]);
 
   // Conditional return hook'larin TUMUNDEN SONRA olmali
   if (isEdit && !student) return <Navigate to="/students" replace />;
@@ -181,7 +188,7 @@ export function StudentFormPage() {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1"><Label className="text-xs">Sınıf *</Label><Input value={form.grade} onChange={e => setForm({ ...form, grade: e.target.value })} placeholder="örn: 6. Sınıf" /></div>
-            <div className="space-y-1"><Label className="text-xs">Medrese *</Label><Input value={form.schoolName} onChange={e => setForm({ ...form, schoolName: e.target.value })} placeholder="Medrese adı yazın" /></div>
+            <div className="space-y-1"><Label className="text-xs">Medrese *</Label><Input value={form.schoolName || student?.schoolName} onChange={e => setForm({ ...form, schoolName: e.target.value })} placeholder="Medrese adı yazın" /></div>
           </div>
           <div className="space-y-1"><Label className="text-xs">Grup</Label>
             <Select value={form.groupId ? String(form.groupId) : 'none'} onValueChange={v => setForm({ ...form, groupId: v === 'none' ? undefined : Number(v) })}>

@@ -79,6 +79,17 @@ CREATE TABLE IF NOT EXISTS students (
     FOREIGN KEY (group_id) REFERENCES class_rooms(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Parent-Student Links (Veli-Ogrenci Iliskisi)
+CREATE TABLE IF NOT EXISTS parent_student_links (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    parent_user_id INT NOT NULL,
+    student_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_parent_student (parent_user_id, student_id),
+    FOREIGN KEY (parent_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Attendance (Yoklama)
 CREATE TABLE IF NOT EXISTS attendance (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -218,6 +229,34 @@ CREATE TABLE IF NOT EXISTS homework_assignments (
     FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
     FOREIGN KEY (template_id) REFERENCES homework_templates(id) ON DELETE SET NULL,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Memorization Texts (Ezber Metinleri)
+CREATE TABLE IF NOT EXISTS memorization_texts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    content TEXT NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Memorization Tracking (Ezber Takip)
+CREATE TABLE IF NOT EXISTS memorization_tracking (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL,
+    text_id INT NOT NULL,
+    status ENUM('completed','repeat','not_completed') NOT NULL DEFAULT 'not_completed',
+    teacher_note TEXT,
+    checked_by INT,
+    checked_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_student_text (student_id, text_id),
+    FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE,
+    FOREIGN KEY (text_id) REFERENCES memorization_texts(id) ON DELETE CASCADE,
+    FOREIGN KEY (checked_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Curriculum Topics (Mufredat Konulari)

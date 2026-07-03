@@ -27,6 +27,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Switch } from '@/components/ui/switch';
 import { useStudentData } from '@/hooks/useStudentData';
 import { useAuth } from '@/hooks/useAuth';
+import { apiDelete, apiGet, apiPost } from '@/hooks/useApi';
 import type { Student, School, Lesson, Attendance, User, UserRole, Survey, SurveyQuestion, SurveyAnswer, QuestionType, HomeworkTemplate, ClassRoom } from '@/types';
 import { PERMISSIONS } from '@/types';
 import type { PermissionMatrixEntry } from '@/hooks/useAuth';
@@ -65,14 +66,60 @@ export function PermissionsPage() {
   const [form, setForm] = useState<Partial<User>>({ active: true });
   const [showPw, setShowPw] = useState(false);
   const [selectedGrid, setSelectedGrid] = useState('students');
+  const [selectedParentStudentId, setSelectedParentStudentId] = useState<string>('');
 
-  const handleSubmit = () => {
-    if (!form.username || !form.password || !form.fullName || !form.role) return;
-    if (editing) updateUser(editing.id, form); else addUser(form as Omit<User, 'id'>);
-    setOpen(false); setEditing(null); setForm({ active: true });
+  const clearParentLinks = async (parentUserId: number) => {
+    try {
+      const links = await apiGet<any[]>('parent-student-links');
+      const parentLinks = links.filter(l => Number(l.parent_user_id) === parentUserId);
+      for (const link of parentLinks) {
+        await apiDelete(`parent-student-links?parentUserId=${parentUserId}&studentId=${Number(link.student_id)}`);
+      }
+    } catch {
+      // Ignore cleanup failures to avoid blocking user update flow.
+    }
   };
-  const openAdd = () => { setEditing(null); setForm({ active: true, role: 'teacher' }); setOpen(true); };
-  const openEdit = (u: User) => { setEditing(u); setForm({ ...u, password: '' }); setOpen(true); };
+
+  const loadParentLinkedStudent = async (parentUserId: number) => {
+    try {
+      const links = await apiGet<any[]>('parent-student-links');
+      const match = links.find(l => Number(l.parent_user_id) === parentUserId);
+      setSelectedParentStudentId(match ? String(match.student_id) : '');
+    } catch {
+      setSelectedParentStudentId('');
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!form.username || !form.fullName || !form.role) return;
+    if (!editing && !form.password) return;
+    if (form.role === 'parent' && !selectedParentStudentId) return;
+
+    if (editing) {
+      await updateUser(editing.id, form);
+      if (form.role === 'parent' && selectedParentStudentId) {
+        await clearParentLinks(editing.id);
+        await apiPost('parent-student-links', { parentUserId: editing.id, studentId: Number(selectedParentStudentId) });
+      } else {
+        await clearParentLinks(editing.id);
+      }
+    } else {
+      const createdUserId = await addUser(form as Omit<User, 'id'>);
+      if (form.role === 'parent' && createdUserId && selectedParentStudentId) {
+        await apiPost('parent-student-links', { parentUserId: createdUserId, studentId: Number(selectedParentStudentId) });
+      }
+    }
+
+    setOpen(false); setEditing(null); setForm({ active: true }); setSelectedParentStudentId('');
+  };
+  const openAdd = () => { setEditing(null); setForm({ active: true, role: 'teacher' }); setSelectedParentStudentId(''); setOpen(true); };
+  const openEdit = async (u: User) => {
+    setEditing(u);
+    setForm({ ...u, password: '' });
+    if (u.role === 'parent') await loadParentLinkedStudent(u.id);
+    else setSelectedParentStudentId('');
+    setOpen(true);
+  };
   const gridColumns = getColumnsForGrid(selectedGrid);
   const gridLabels: Record<string, string> = {
     students: 'Öğrenciler', schools: 'Okullar', lessons: 'Dersler', lessonStudents: 'Ders Öğrencileri',
@@ -87,7 +134,7 @@ export function PermissionsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center"><h2 className="text-xl sm:text-2xl font-bold text-gray-900">Yetki Yönetimi</h2><Button onClick={openAdd}><Plus size={18} className="mr-1" /> Kullanıcı Ekle</Button></div>
+      <div className="flex justify-between items-center"><h2 className="text-xl sm:text-2xl font-bold text-gray-900">Yetki Yönetimi</h2></div>
       <div className="flex border-b">
         <button onClick={() => setActiveTab('users')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'users' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500'}`}>Kullanıcılar</button>
         <button onClick={() => setActiveTab('matrix')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'matrix' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500'}`}>Yetki Matrisi</button>
@@ -191,7 +238,24 @@ export function PermissionsPage() {
 
       <Dialog open={open} onOpenChange={setOpen}><DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{editing ? 'Kullanıcı Düzenle' : 'Yeni Kullanıcı'}</DialogTitle></DialogHeader><div className="space-y-3 pt-4">
         <div className="grid grid-cols-2 gap-4"><div className="space-y-1"><Label className="text-xs">Kullanıcı Adı *</Label><Input value={form.username || ''} onChange={e => setForm({ ...form, username: e.target.value })} /></div><div className="space-y-1"><Label className="text-xs">Ad Soyad *</Label><Input value={form.fullName || ''} onChange={e => setForm({ ...form, fullName: e.target.value })} /></div></div>
-        <div className="space-y-1"><Label className="text-xs">Rol *</Label><Select value={form.role || ''} onValueChange={v => setForm({ ...form, role: v as UserRole })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(ROLE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent></Select></div>
+        <div className="space-y-1"><Label className="text-xs">Rol *</Label><Select value={form.role || ''} onValueChange={v => {
+          const nextRole = v as UserRole;
+          setForm({ ...form, role: nextRole });
+          if (nextRole !== 'parent') setSelectedParentStudentId('');
+        }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(ROLE_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent></Select></div>
+        {form.role === 'parent' && (
+          <div className="space-y-1">
+            <Label className="text-xs">Öğrenciyi Eşleştir *</Label>
+            <Select value={selectedParentStudentId} onValueChange={setSelectedParentStudentId}>
+              <SelectTrigger><SelectValue placeholder="Öğrenci seçin" /></SelectTrigger>
+              <SelectContent>
+                {data.students.map(s => (
+                  <SelectItem key={s.id} value={String(s.id)}>{s.firstName} {s.lastName}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <div className="space-y-1"><Label className="text-xs">{editing ? 'Yeni Şifre (boş=değişmez)' : 'Şifre *'}</Label><div className="relative"><Input type={showPw ? 'text' : 'password'} value={form.password || ''} onChange={e => setForm({ ...form, password: e.target.value })} /><button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" onClick={() => setShowPw(!showPw)}>{showPw ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>
         <div className="grid grid-cols-2 gap-4"><div className="space-y-1"><Label className="text-xs">E-posta</Label><Input value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} /></div><div className="space-y-1"><Label className="text-xs">Telefon</Label><Input value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} /></div></div>
         <div className="flex items-center gap-2"><Switch checked={form.active ?? true} onCheckedChange={v => setForm({ ...form, active: v })} /><Label className="text-xs">Aktif</Label></div>

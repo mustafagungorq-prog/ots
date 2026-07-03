@@ -27,6 +27,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Switch } from '@/components/ui/switch';
 import { useStudentData } from '@/hooks/useStudentData';
 import { useAuth } from '@/hooks/useAuth';
+import { apiPost } from '@/hooks/useApi';
 import type { Student, School, Lesson, Attendance, User, UserRole, Survey, SurveyQuestion, SurveyAnswer, QuestionType, HomeworkTemplate, ClassRoom } from '@/types';
 import { PERMISSIONS } from '@/types';
 import type { PermissionMatrixEntry } from '@/hooks/useAuth';
@@ -55,8 +56,18 @@ function getMonthName(key: string) {
 // ====== STUDENT PROFILE PAGE ======
 export function StudentProfilePage() {
   const data = useStudentData();
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
   const { id } = useParams();
+  const profileId = Number(id);
+  const isParent = currentUser?.role === 'parent';
+  const canManageReports = !isParent;
+  const parentStudentId = isParent ? currentUser?.linkedStudentIds?.[0] : undefined;
+
+  if (isParent && parentStudentId && profileId !== parentStudentId) {
+    return <Navigate to={`/student-profile/${parentStudentId}`} replace />;
+  }
+
   const student = data.students.find(s => s.id === Number(id));
   const [activeTab, setActiveTab] = useState<'info' | 'attendance' | 'progress' | 'homework' | 'lessonlog' | 'report'>('info');
   const [reportOpen, setReportOpen] = useState(false);
@@ -88,6 +99,17 @@ export function StudentProfilePage() {
     .getStudentHomeworks(student.id)
     .sort((a, b) => ((b.createdAt || b.created_at || '') as string).localeCompare((a.createdAt || a.created_at || '') as string));
 
+  const studentMemorization = data.memorizationTracking
+    .filter(m => m.studentId === student.id)
+    .map(m => {
+      const text = data.memorizationTexts.find(t => t.id === m.textId);
+      return {
+        ...m,
+        textTitle: text?.title || `Metin #${m.textId}`,
+      };
+    })
+    .sort((a, b) => ((b.checkedAt || b.updatedAt || '') as string).localeCompare((a.checkedAt || a.updatedAt || '') as string));
+
   // Ders isleme kayitlari
   const lessonLogs = data.getStudentLessonLogs(student.id);
 
@@ -97,11 +119,135 @@ export function StudentProfilePage() {
   // Yoklama ozeti
   const attStats = { total: studentAttendance.length, present: studentAttendance.filter(a => a.status === 'present').length, absent: studentAttendance.filter(a => a.status === 'absent').length };
 
+  const buildReportMailBody = () => {
+    const lessonsText = studentLessons.map(l => l.name).join(', ') || '-';
+    const latestProgress = studentProgress[0];
+    const teacherComments = data.comments
+      .filter(c => c.studentId === student.id && c.type === 'teacher')
+      .slice(0, 3)
+      .map(c => `- ${c.createdAt}: ${c.content}`)
+      .join('\n') || '- Yok';
+
+    return [
+      `SAYIN ${student.parentName || student.firstName + ' ' + student.lastName},`,
+      '',
+      `${student.firstName} ${student.lastName} için Son 30 gün:`,
+      '',
+      'ÖĞRENCİ:',
+      `- Ad: ${student.firstName} ${student.lastName}`,
+      `- Sınıf: ${student.grade}`,
+      `- Okul: ${school?.name || '-'}`,
+      `- Dersler: ${lessonsText}`,
+      '',
+      'KURAN:',
+      latestProgress ? `- Son: ${latestProgress.kuranCurrentPage}\n- Okunan: ${latestProgress.kuranPages}` : '- Yok',
+      '',
+      'RİSALE:',
+      latestProgress ? `- Son: ${latestProgress.risaleCurrentPage}\n- Okunan: ${latestProgress.risalePages}` : '- Yok',
+      '',
+      'ELİF-BA:',
+      latestProgress ? `- Son: ${latestProgress.elifbaCurrentPage}` : '- Yok',
+      '',
+      'YOKLAMA:',
+      `- Toplam: ${studentAttendance.length}, Mevcut: ${studentAttendance.filter(a => a.status === 'present').length}, İzinli: ${studentAttendance.filter(a => a.status === 'excused').length}, Geç: ${studentAttendance.filter(a => a.status === 'late').length}, Yok: ${studentAttendance.filter(a => a.status === 'absent').length}`,
+      '',
+      'YORUMLAR:',
+      teacherComments,
+    ].join('\n');
+  };
+
+  const buildReportMailHtml = () => {
+    const lessonsText = studentLessons.map(l => l.name).join(', ') || '-';
+    const latestProgress = studentProgress[0];
+    const teacherComments = data.comments
+      .filter(c => c.studentId === student.id && c.type === 'teacher')
+      .slice(0, 3);
+
+    const esc = (v: any) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    const commentsHtml = teacherComments.length > 0
+      ? `<ul style="margin:0;padding-left:18px;">${teacherComments.map(c => `<li><strong>${esc(c.createdAt)}</strong>: ${esc(c.content)}</li>`).join('')}</ul>`
+      : '<span>- Yok</span>';
+
+    const infoRow = (label: string, value: string) => `<tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f8fafc;width:170px;"><strong>${esc(label)}</strong></td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${esc(value)}</td></tr>`;
+
+    return `
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gelişim Raporu</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+  <div style="max-width:760px;margin:24px auto;padding:0 12px;">
+    <div style="background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+      <div style="padding:18px 20px;background:linear-gradient(135deg,#ecfdf5,#d1fae5);border-bottom:1px solid #d1fae5;">
+        <h1 style="margin:0;font-size:20px;line-height:1.3;">365 Kuran Kuran Mektebi</h1>
+        <p style="margin:6px 0 0 0;font-size:14px;color:#065f46;">Öğrenci Gelişim Raporu</p>
+      </div>
+      <div style="padding:20px;">
+        <p style="margin:0 0 12px 0;font-size:14px;">Sayın <strong>${esc(student.parentName || `${student.firstName} ${student.lastName}`)}</strong>,</p>
+        <p style="margin:0 0 16px 0;font-size:14px;">${esc(student.firstName)} ${esc(student.lastName)} için son 30 günlük gelişim özeti aşağıdadır.</p>
+
+        <h3 style="margin:0 0 8px 0;font-size:14px;color:#065f46;">Öğrenci Bilgileri</h3>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:13px;">
+          ${infoRow('Ad Soyad', `${student.firstName} ${student.lastName}`)}
+          ${infoRow('Sınıf', student.grade || '-')}
+          ${infoRow('Okul', school?.name || '-')}
+          ${infoRow('Dersler', lessonsText)}
+        </table>
+
+        <h3 style="margin:0 0 8px 0;font-size:14px;color:#065f46;">Öğrenim Durumu</h3>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:16px;font-size:13px;">
+          ${infoRow('Kuran', latestProgress ? `Son: ${latestProgress.kuranCurrentPage} / Okunan: ${latestProgress.kuranPages}` : 'Kayıt yok')}
+          ${infoRow('Risale', latestProgress ? `Son: ${latestProgress.risaleCurrentPage} / Okunan: ${latestProgress.risalePages}` : 'Kayıt yok')}
+          ${infoRow('Elif-ba', latestProgress ? `Son: ${latestProgress.elifbaCurrentPage}` : 'Kayıt yok')}
+          ${infoRow('Yoklama Özeti', `Toplam: ${studentAttendance.length}, Mevcut: ${studentAttendance.filter(a => a.status === 'present').length}, İzinli: ${studentAttendance.filter(a => a.status === 'excused').length}, Geç: ${studentAttendance.filter(a => a.status === 'late').length}, Yok: ${studentAttendance.filter(a => a.status === 'absent').length}`)}
+        </table>
+
+        <h3 style="margin:0 0 8px 0;font-size:14px;color:#065f46;">Öğretmen Yorumları</h3>
+        <div style="font-size:13px;line-height:1.5;">${commentsHtml}</div>
+
+        <p style="margin:18px 0 0 0;font-size:12px;color:#6b7280;">Bu e-posta 365 Kuran Kuran Mektebi öğrenci takip sistemi tarafından oluşturulmuştur.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+  };
+
+  const sendStyledReportMail = async () => {
+    if (!student.email) {
+      alert('Öğrencinin e-posta adresi bulunmuyor');
+      return;
+    }
+
+    const subjectRaw = `${student.firstName} ${student.lastName} - Gelişim Raporu`;
+    const bodyText = buildReportMailBody();
+    const bodyHtml = buildReportMailHtml();
+
+    try {
+      await apiPost('mail/student-report', {
+        to: student.email,
+        subject: subjectRaw,
+        html: bodyHtml,
+        text: bodyText,
+      });
+      alert('E-posta tasarımlı formatta gönderildi.');
+    } catch (err: any) {
+      const subject = encodeURIComponent(subjectRaw);
+      const body = encodeURIComponent(bodyText);
+      window.open(`mailto:${student.email}?subject=${subject}&body=${body}`, '_blank');
+      alert(`Mail servisi kullanılamadı (${err?.message || 'hata'}). Taslak, e-posta uygulamasında açıldı.`);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto space-y-4 min-w-0 overflow-x-hidden">
       {/* Ust bar */}
       <div className="flex items-center gap-3">
-        <Button variant="outline" size="icon" onClick={() => navigate('/progress')}><ArrowLeft size={18} /></Button>
+        <Button variant="outline" size="icon" onClick={() => navigate(isParent ? `/student-profile/${parentStudentId ?? 0}` : '/progress')}><ArrowLeft size={18} /></Button>
         <h2 className="text-xl sm:text-2xl font-bold text-gray-900">{student.firstName} {student.lastName}</h2>
         <Badge variant="outline">{student.grade}</Badge>
       </div>
@@ -243,7 +389,7 @@ export function StudentProfilePage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
           <h3 className="text-lg font-bold">Öğrenci Rapor Kartı</h3>
           <div className="flex flex-wrap gap-2 max-w-full">
-            <Button variant="outline" size="sm" onClick={() => {
+            {canManageReports && <Button variant="outline" size="sm" onClick={() => {
               const items: Record<string, { subject: string; note: string; status: 'iyi' | 'orta' | 'gelisim' | 'baslangic'; score: string }> = {};
               studentLessons.forEach(l => {
                 const lessonKey = String(l.id);
@@ -258,17 +404,13 @@ export function StudentProfilePage() {
               });
               setReportItems(items);
               setReportOpen(true);
-            }}><Plus size={16} className="mr-1" /> Yeni Rapor Ekle</Button>
-            <Button variant="outline" size="sm" onClick={() => window.print()}><Printer size={16} className="mr-1" /> Yazdır</Button>
-            <Button variant="outline" size="sm" className="text-blue-600 border-blue-300 hover:bg-blue-50" onClick={() => {
-              const subject = encodeURIComponent(`${student.firstName} ${student.lastName} - Gelişim Raporu`);
-              const body = encodeURIComponent(`Merhaba ${student.parentName || student.firstName + ' ' + student.lastName},\n\n${student.firstName} ${student.lastName} adlı öğrencimizin gelişim raporu ekte sunulmaktadır.\n\nMedrese: ${school?.name || '-'}\nSınıf: ${student.grade}\n\n365 Kuran Kuran Mektebi`);
-              window.open(`mailto:${student.email || ''}?subject=${subject}&body=${body}`, '_blank');
-            }}><Mail size={16} className="mr-1" /> E-Posta</Button>
-            <Button variant="outline" size="sm" className="text-green-600 border-green-300 hover:bg-green-50" onClick={() => {
+            }}><Plus size={16} className="mr-1" /> Yeni Rapor Ekle</Button>}
+            {canManageReports && <Button variant="outline" size="sm" onClick={() => window.print()}><Printer size={16} className="mr-1" /> Yazdır</Button>}
+            <Button variant="outline" size="sm" className="text-blue-600 border-blue-300 hover:bg-blue-50" onClick={sendStyledReportMail}><Mail size={16} className="mr-1" /> E-Posta</Button>
+            {canManageReports && <Button variant="outline" size="sm" className="text-green-600 border-green-300 hover:bg-green-50" onClick={() => {
               const text = encodeURIComponent(`365 Kuran Kuran Mektebi - ${student.firstName} ${student.lastName} Gelişim Raporu. Medrese: ${school?.name || '-'}. Detaylı bilgi için bizi arayabilirsiniz.`);
               window.open(`sms:${student.parentPhone || student.phone}?body=${text}`, '_blank');
-            }}><Smartphone size={16} className="mr-1" /> SMS</Button>
+            }}><Smartphone size={16} className="mr-1" /> SMS</Button>}
           </div>
         </div>
 
@@ -407,6 +549,49 @@ export function StudentProfilePage() {
               </div> : <p className="text-sm text-gray-500">Henüz ödev atanmamış</p>}
             </div>
 
+            {/* 5. Ezber Takibi Ozeti */}
+            <div className="w-full min-w-0">
+              <h4 className="font-bold text-sm mb-3 flex items-center gap-2"><ListChecks size={16} className="text-emerald-600" /> Ezber Takibi Özeti</h4>
+              {studentMemorization.length > 0 ? <>
+                <div className="mb-3 flex flex-wrap gap-2 text-xs">
+                  <Badge className="bg-green-600">Tamamladı: {studentMemorization.filter(m => m.status === 'completed').length}</Badge>
+                  <Badge className="bg-amber-500">Tekrarlanacak: {studentMemorization.filter(m => m.status === 'repeat').length}</Badge>
+                  <Badge className="bg-red-600">Tamamlanmadı: {studentMemorization.filter(m => m.status === 'not_completed').length}</Badge>
+                </div>
+                <div className="sm:hidden space-y-2">
+                  {studentMemorization.map(m => (
+                    <div key={m.id} className="rounded-lg border bg-white p-3 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium break-words">{m.textTitle}</p>
+                        <Badge className={`text-[10px] text-white ${m.status === 'completed' ? 'bg-green-500' : m.status === 'repeat' ? 'bg-amber-500' : 'bg-red-500'}`}>
+                          {m.status === 'completed' ? 'TAMAMLADI' : m.status === 'repeat' ? 'TEKRARLANACAK' : 'TAMAMLANMADI'}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-gray-500 break-words">{m.teacherNote || '-'}</p>
+                      <p className="text-[10px] text-gray-400">Kontrol: {m.checkedAt || '-'}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="hidden sm:block w-full max-w-full overflow-x-auto">
+                  <Table className="min-w-[720px]"><TableHeader><TableRow>
+                    <TableHead className="text-xs">Ezber Metni</TableHead>
+                    <TableHead className="text-xs text-center">Durum</TableHead>
+                    <TableHead className="text-xs">Öğretmen Notu</TableHead>
+                    <TableHead className="text-xs">Kontrol Tarihi</TableHead>
+                  </TableRow></TableHeader><TableBody>
+                    {studentMemorization.map(m => (
+                      <TableRow key={m.id}>
+                        <TableCell className="text-xs font-medium">{m.textTitle}</TableCell>
+                        <TableCell className="text-center"><Badge className={`text-[10px] text-white ${m.status === 'completed' ? 'bg-green-500' : m.status === 'repeat' ? 'bg-amber-500' : 'bg-red-500'}`}>{m.status === 'completed' ? 'Tamamladı' : m.status === 'repeat' ? 'Tekrarlanacak' : 'Tamamlanmadı'}</Badge></TableCell>
+                        <TableCell className="text-xs text-gray-500">{m.teacherNote || '-'}</TableCell>
+                        <TableCell className="text-xs">{m.checkedAt || '-'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody></Table>
+                </div>
+              </> : <p className="text-sm text-gray-500">Henüz ezber takip kaydı yok</p>}
+            </div>
+
             {/* Alt bilgi */}
             <div className="border-t pt-4 text-center text-xs text-gray-400">
               <p>365 Kuran Kuran Mektebi • {new Date().toLocaleDateString('tr-TR')}</p>
@@ -415,7 +600,7 @@ export function StudentProfilePage() {
         </Card>
 
         {/* Rapor Olusturma Dialog */}
-        <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        {canManageReports && <Dialog open={reportOpen} onOpenChange={setReportOpen}>
           <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto w-[95vw] sm:w-full">
             <DialogHeader><DialogTitle>Öğrenci Raporu Ekle</DialogTitle></DialogHeader>
             <div className="space-y-3 pt-2">
@@ -474,7 +659,7 @@ export function StudentProfilePage() {
               </div>
             </div>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
         </div>
       </div>}
 

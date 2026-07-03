@@ -10,6 +10,7 @@ export interface User {
   phone: string;
   active: boolean;
   assignedLessons?: number[];
+  linkedStudentIds?: number[];
 }
 
 export interface Student {
@@ -112,6 +113,31 @@ export interface HomeworkAssignment {
   completedAt?: string;
   createdAt?: string;
   type?: 'ezber' | 'okuma-kuran' | 'okuma-risale' | 'diger';
+}
+
+export interface MemorizationText {
+  id: number;
+  title: string;
+  content: string;
+  active: boolean;
+  createdBy?: number;
+  createdByName?: string;
+  createdAt?: string;
+}
+
+export type MemorizationStatus = 'completed' | 'repeat' | 'not_completed';
+
+export interface MemorizationTracking {
+  id: number;
+  studentId: number;
+  textId: number;
+  status: MemorizationStatus;
+  teacherNote?: string;
+  checkedBy?: number;
+  checkedByName?: string;
+  checkedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Report {
@@ -227,6 +253,8 @@ export const PERMISSIONS = {
   ATTENDANCE_MARK: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] as UserRole[],
   PROGRESS_CREATE: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] as UserRole[],
   COMMENT_CREATE: ['superadmin', 'admin', 'authorized_teacher'] as UserRole[],
+  MEMORIZATION_TEXT_MANAGE: ['superadmin', 'admin'] as UserRole[],
+  MEMORIZATION_TRACK: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] as UserRole[],
   REPORT_CREATE: ['superadmin', 'admin', 'authorized_teacher'] as UserRole[],
   PERMISSION_MANAGE: ['superadmin'] as UserRole[],
   USER_MANAGE: ['superadmin', 'admin'] as UserRole[],

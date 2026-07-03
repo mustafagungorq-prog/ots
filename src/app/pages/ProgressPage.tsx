@@ -56,7 +56,7 @@ function getMonthName(key: string) {
 export function ProgressPage() {
   const data = useStudentData();
   const navigate = useNavigate();
-  const { canViewColumn, currentUser, teacherLessons } = useAuth();
+  const { canViewColumn, currentUser, teacherLessons, canEdit } = useAuth();
   const isTeacher = currentUser?.role === 'teacher' || currentUser?.role === 'authorized_teacher';
   // Ogretmenin atanmis dersleri - dogrudan teacherLessons state'inden oku
   const myLessonIds = isTeacher && currentUser
@@ -260,6 +260,10 @@ export function ProgressPage() {
     window.open(`sms:${student.parentPhone || student.phone || ''}?body=${text}`, '_blank');
   };
 
+  const goStudentPage = (studentId: number) => {
+    navigate(canEdit ? `/student-form/${studentId}` : `/student-profile/${studentId}`);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -342,7 +346,7 @@ export function ProgressPage() {
               if (todayAtt) data.updateAttendanceStatus(todayAtt.id, status);
               else data.addAttendance({ studentId: s.id, date: todayStr, status, lessonId, note: undefined });
             };
-            return <TableRow key={s.id} className="cursor-pointer hover:bg-blue-50" onClick={() => navigate(`/student-profile/${s.id}`)}>
+            return <TableRow key={s.id} className="cursor-pointer hover:bg-blue-50" onClick={() => goStudentPage(s.id)}>
               <TableCell className="font-medium text-sm">{s.firstName} {s.lastName}</TableCell>
               <TableCell className="text-xs">{s.grade}</TableCell>
               <TableCell className="text-center">{lp ? <Badge variant="outline" className="text-green-700 border-green-300 text-xs">S.{lp.kuranCurrentPage}</Badge> : <span className="text-xs text-gray-400">-</span>}</TableCell>
@@ -350,8 +354,8 @@ export function ProgressPage() {
               <TableCell className="text-center">{lp ? <Badge variant="outline" className="text-orange-700 border-orange-300 text-xs">S.{lp.elifbaCurrentPage}</Badge> : <span className="text-xs text-gray-400">-</span>}</TableCell>
               <TableCell className="text-center">
                 <div className="flex gap-1 justify-center">
-                  <Button size="sm" variant={todayAtt?.status === 'present' ? 'default' : 'outline'} className={`text-[10px] h-6 px-2 ${todayAtt?.status === 'present' ? 'bg-green-600' : ''}`} onClick={() => markToday('present')}>Var</Button>
-                  <Button size="sm" variant={todayAtt?.status === 'absent' ? 'default' : 'outline'} className={`text-[10px] h-6 px-2 ${todayAtt?.status === 'absent' ? 'bg-red-600' : ''}`} onClick={() => markToday('absent')}>Yok</Button>
+                  <Button size="sm" variant={todayAtt?.status === 'present' ? 'default' : 'outline'} className={`text-[10px] h-6 px-2 ${todayAtt?.status === 'present' ? 'bg-green-600' : ''}`} onClick={(e) => { e.stopPropagation(); markToday('present'); }}>Var</Button>
+                  <Button size="sm" variant={todayAtt?.status === 'absent' ? 'default' : 'outline'} className={`text-[10px] h-6 px-2 ${todayAtt?.status === 'absent' ? 'bg-red-600' : ''}`} onClick={(e) => { e.stopPropagation(); markToday('absent'); }}>Yok</Button>
                 </div>
               </TableCell>
               <TableCell className="text-center">{attBadge}</TableCell>
@@ -402,9 +406,9 @@ export function ProgressPage() {
               <TableHead className="text-xs text-center w-24">Elif.Son</TableHead>
               <TableHead className="text-xs">Not</TableHead>
             </TableRow></TableHeader><TableBody>{studentsToShow.map(s => (
-              <TableRow key={s.id} className={`cursor-pointer hover:bg-blue-50 transition-colors ${selectedStudents.includes(s.id) ? 'bg-purple-50' : ''}`} onDoubleClick={() => navigate(`/student-profile/${s.id}`)}>
+              <TableRow key={s.id} className={`hover:bg-blue-50 transition-colors ${selectedStudents.includes(s.id) ? 'bg-purple-50' : ''}`}>
                 <TableCell onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedStudents.includes(s.id)} onChange={() => toggleStudentSelection(s.id)} className="w-4 h-4 accent-emerald-600 cursor-pointer" /></TableCell>
-                <TableCell className="font-medium text-sm whitespace-nowrap">{s.firstName} {s.lastName}<p className="text-[10px] text-gray-400">{s.grade}</p></TableCell>
+                <TableCell className="font-medium text-sm whitespace-nowrap cursor-pointer" onClick={() => navigate(`/student-profile/${s.id}`)}>{s.firstName} {s.lastName}<p className="text-[10px] text-gray-400">{s.grade}</p></TableCell>
                 <TableCell><Input type="number" size={1} className="h-8 text-xs w-full min-w-16" value={bulkData[s.id]?.kp || ''} onChange={e => updateBulk(s.id, 'kp', e.target.value)} placeholder="0" /></TableCell>
                 <TableCell><Input type="number" size={1} className="h-8 text-xs w-full min-w-16" value={bulkData[s.id]?.kc || ''} onChange={e => updateBulk(s.id, 'kc', e.target.value)} placeholder="0" /></TableCell>
                 <TableCell><Input type="number" size={1} className="h-8 text-xs w-full min-w-16" value={bulkData[s.id]?.rp || ''} onChange={e => updateBulk(s.id, 'rp', e.target.value)} placeholder="0" /></TableCell>
@@ -541,7 +545,7 @@ export function ProgressPage() {
         {canViewColumn('progress', 'risale') && <TableCell className="text-xs">+{p.risalePages}/S.{p.risaleCurrentPage}</TableCell>}
         {canViewColumn('progress', 'elifba') && <TableCell className="text-xs">S.{p.elifbaCurrentPage}</TableCell>}
         {canViewColumn('progress', 'notes') && <TableCell className="text-xs text-gray-500 max-w-[150px] truncate">{p.notes}</TableCell>}
-        {canViewColumn('progress', 'actions') && <TableCell><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { if (confirm('Gelişim kaydı silinsin mi?')) data.deleteProgress(p.id); }}><Trash2 size={14} className="text-red-500" /></Button></TableCell>}
+        {canViewColumn('progress', 'actions') && <TableCell><div className="flex gap-1">{canEdit && s && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate(`/student-form/${s.id}`)} title="Öğrenciyi düzenle"><Pencil size={14} /></Button>}<Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { if (confirm('Gelişim kaydı silinsin mi?')) data.deleteProgress(p.id); }}><Trash2 size={14} className="text-red-500" /></Button></div></TableCell>}
       </TableRow>; })}{data.progress.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-500">Kayıt yok</TableCell></TableRow>}</TableBody></Table></CardContent></Card>}
     </div>
   );

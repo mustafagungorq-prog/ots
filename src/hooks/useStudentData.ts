@@ -1,5 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { Student, School, Lesson, Attendance, Progress, Comment, CurriculumTopic, LessonLog, ClassRoom } from '@/types';
+import type {
+  Student,
+  School,
+  Lesson,
+  Attendance,
+  Progress,
+  Comment,
+  CurriculumTopic,
+  LessonLog,
+  ClassRoom,
+  MemorizationText,
+  MemorizationTracking,
+  MemorizationStatus,
+} from '@/types';
 import { apiGet, apiPost, apiPut, apiDelete } from './useApi';
 
 export function useStudentData() {
@@ -22,45 +35,66 @@ export function useStudentData() {
   const [homeworkTemplates, setHomeworkTemplates] = useState<any[]>([]);
   const [homeworkAssignments, setHomeworkAssignments] = useState<any[]>([]);
   const [studentReports, setStudentReports] = useState<any[]>([]);
+  const [memorizationTexts, setMemorizationTexts] = useState<MemorizationText[]>([]);
+  const [memorizationTracking, setMemorizationTracking] = useState<MemorizationTracking[]>([]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const results = await Promise.allSettled([
-        apiGet<any[]>('students'),
-        apiGet<any[]>('schools'),
-        apiGet<any[]>('lessons'),
-        apiGet<any[]>('attendance'),
-        apiGet<any[]>('progress'),
-        apiGet<any[]>('comments'),
-        apiGet<any[]>('reports'),
-        apiGet<any[]>('curriculum-topics'),
-        apiGet<any[]>('lesson-logs'),
-        apiGet<any[]>('class-rooms'),
-        apiGet<any[]>('surveys'),
-        apiGet<any[]>('survey-questions'),
-        apiGet<any[]>('survey-answers'),
-        apiGet<any[]>('homework-templates'),
-        apiGet<any[]>('homework-assignments'),
-        apiGet<any[]>('student-reports'),
-      ]);
+      const role = getCurrentRoleFromToken();
 
-      if (results[0].status === 'fulfilled') setStudents(results[0].value.map(ns));
-      if (results[1].status === 'fulfilled') setSchools(results[1].value.map(nsc));
-      if (results[2].status === 'fulfilled') setLessons(results[2].value.map(nl));
-      if (results[3].status === 'fulfilled') setAttendance(results[3].value.map(na));
-      if (results[4].status === 'fulfilled') setProgress(results[4].value.map(np));
-      if (results[5].status === 'fulfilled') setComments(results[5].value.map(nco));
-      if (results[6].status === 'fulfilled') setReports(results[6].value);
-      if (results[7].status === 'fulfilled') setCurriculumTopics(results[7].value.map(nct));
-      if (results[8].status === 'fulfilled') setLessonLogs(results[8].value.map(nll));
-      if (results[9].status === 'fulfilled') setClassRooms(results[9].value.map(ncr));
-      if (results[10].status === 'fulfilled') setSurveys(results[10].value);
-      if (results[11].status === 'fulfilled') setSurveyQuestions(results[11].value);
-      if (results[12].status === 'fulfilled') setSurveyAnswers(results[12].value);
-      if (results[13].status === 'fulfilled') setHomeworkTemplates(results[13].value);
-      if (results[14].status === 'fulfilled') setHomeworkAssignments(results[14].value);
-      if (results[15].status === 'fulfilled') setStudentReports(results[15].value);
+      const requests: Array<[string, Promise<any[]>]> = [
+        ['students', apiGet<any[]>('students')],
+        ['schools', apiGet<any[]>('schools')],
+        ['lessons', apiGet<any[]>('lessons')],
+        ['attendance', apiGet<any[]>('attendance')],
+        ['progress', apiGet<any[]>('progress')],
+        ['comments', apiGet<any[]>('comments')],
+      ];
+
+      if (role !== 'parent') {
+        requests.push(
+          ['reports', apiGet<any[]>('reports')],
+          ['curriculumTopics', apiGet<any[]>('curriculum-topics')],
+          ['lessonLogs', apiGet<any[]>('lesson-logs')],
+          ['classRooms', apiGet<any[]>('class-rooms')],
+          ['surveys', apiGet<any[]>('surveys')],
+          ['surveyQuestions', apiGet<any[]>('survey-questions')],
+          ['surveyAnswers', apiGet<any[]>('survey-answers')],
+          ['homeworkTemplates', apiGet<any[]>('homework-templates')],
+          ['homeworkAssignments', apiGet<any[]>('homework-assignments')],
+          ['studentReports', apiGet<any[]>('student-reports')],
+          ['memorizationTexts', apiGet<any[]>('memorization-texts')],
+          ['memorizationTracking', apiGet<any[]>('memorization-tracking')],
+        );
+      }
+
+      const results = await Promise.allSettled(requests.map(([, req]) => req));
+
+      results.forEach((result, index) => {
+        if (result.status !== 'fulfilled') return;
+        const key = requests[index][0];
+        const value = result.value;
+
+        if (key === 'students') setStudents(value.map(ns));
+        if (key === 'schools') setSchools(value.map(nsc));
+        if (key === 'lessons') setLessons(value.map(nl));
+        if (key === 'attendance') setAttendance(value.map(na));
+        if (key === 'progress') setProgress(value.map(np));
+        if (key === 'comments') setComments(value.map(nco));
+        if (key === 'reports') setReports(value);
+        if (key === 'curriculumTopics') setCurriculumTopics(value.map(nct));
+        if (key === 'lessonLogs') setLessonLogs(value.map(nll));
+        if (key === 'classRooms') setClassRooms(value.map(ncr));
+        if (key === 'surveys') setSurveys(value);
+        if (key === 'surveyQuestions') setSurveyQuestions(value.map(nsq));
+        if (key === 'surveyAnswers') setSurveyAnswers(value.map(nsa));
+        if (key === 'homeworkTemplates') setHomeworkTemplates(value);
+        if (key === 'homeworkAssignments') setHomeworkAssignments(value);
+        if (key === 'studentReports') setStudentReports(value);
+        if (key === 'memorizationTexts') setMemorizationTexts(value.map(nmt));
+        if (key === 'memorizationTracking') setMemorizationTracking(value.map(nmtr));
+      });
     } catch (err) {
       console.error('API load error:', err);
     } finally {
@@ -292,10 +326,11 @@ export function useStudentData() {
     _api(() => apiDelete(`surveys/${id}`).then(() => loadAll()));
   };
   const addSurveyQuestion = (q: any) => {
+    const payload = surveyQuestionToApi(q);
     const newId = Date.now();
-    const newQ = { ...q, id: newId };
+    const newQ = { ...nsq(payload), id: newId };
     setSurveyQuestions(prev => [...prev, newQ]);
-    _api(() => apiPost('survey-questions', q).then(() => loadAll()));
+    _api(() => apiPost('survey-questions', payload).then(() => loadAll()));
     return newQ;
   };
   const deleteSurveyQuestion = (id: number) => {
@@ -364,6 +399,58 @@ export function useStudentData() {
     _api(() => apiDelete(`student-reports/${id}`).then(() => loadAll()));
   };
 
+  // --- Memorization Texts ---
+  const addMemorizationText = (text: Omit<MemorizationText, 'id'>) => {
+    const newId = Date.now();
+    const newText = { ...text, id: newId } as MemorizationText;
+    setMemorizationTexts(prev => [newText, ...prev]);
+    _api(() => apiPost('memorization-texts', text).then(() => loadAll()));
+    return newText;
+  };
+  const updateMemorizationText = (id: number, data: Partial<MemorizationText>) => {
+    setMemorizationTexts(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
+    _api(() => apiPut(`memorization-texts/${id}`, data).then(() => loadAll()));
+  };
+  const deleteMemorizationText = (id: number) => {
+    setMemorizationTexts(prev => prev.filter(t => t.id !== id));
+    setMemorizationTracking(prev => prev.filter(r => r.textId !== id));
+    _api(() => apiDelete(`memorization-texts/${id}`).then(() => loadAll()));
+  };
+
+  // --- Memorization Tracking ---
+  const setMemorizationStatus = (
+    studentId: number,
+    textId: number,
+    status: MemorizationStatus,
+    teacherNote?: string,
+  ) => {
+    const existing = memorizationTracking.find(r => r.studentId === studentId && r.textId === textId);
+    if (existing) {
+      setMemorizationTracking(prev => prev.map(r => r.id === existing.id ? { ...r, status, teacherNote } : r));
+    } else {
+      setMemorizationTracking(prev => [
+        {
+          id: Date.now(),
+          studentId,
+          textId,
+          status,
+          teacherNote,
+        },
+        ...prev,
+      ]);
+    }
+
+    _api(() => apiPost('memorization-tracking', { studentId, textId, status, teacherNote }).then(() => loadAll()));
+  };
+  const updateMemorizationTracking = (id: number, data: Partial<MemorizationTracking>) => {
+    setMemorizationTracking(prev => prev.map(r => r.id === id ? { ...r, ...data } : r));
+    _api(() => apiPut(`memorization-tracking/${id}`, data).then(() => loadAll()));
+  };
+  const deleteMemorizationTracking = (id: number) => {
+    setMemorizationTracking(prev => prev.filter(r => r.id !== id));
+    _api(() => apiDelete(`memorization-tracking/${id}`).then(() => loadAll()));
+  };
+
   return {
     initialized, loading,
     students, schools, lessons, attendance, progress, comments, reports,
@@ -371,6 +458,7 @@ export function useStudentData() {
     curriculumTopics, lessonLogs, classRooms,
     homeworkTemplates, homeworkAssignments,
     studentReports,
+    memorizationTexts, memorizationTracking,
     refresh: loadAll,
     addStudent, updateStudent, deleteStudent, getStudentLessons,
     addSchool, updateSchool, deleteSchool,
@@ -391,6 +479,8 @@ export function useStudentData() {
     addHomeworkTemplate, updateHomeworkTemplate, deleteHomeworkTemplate,
     addHomeworkAssignment, getStudentHomeworks, toggleHomeworkCompleted, deleteHomeworkAssignment,
     addStudentReport, getStudentReports, deleteStudentReport,
+    addMemorizationText, updateMemorizationText, deleteMemorizationText,
+    setMemorizationStatus, updateMemorizationTracking, deleteMemorizationTracking,
   };
 }
 
@@ -401,7 +491,7 @@ function ns(r: any): Student {
   return {
     id: r.id, tcKimlik: r.tc_kimlik || '', firstName: r.first_name || '', lastName: r.last_name || '',
     age: r.age || 0, birthYear: r.birth_year || 0, city: r.city || '',
-    schoolId: r.school_id || 0, schoolName: r.school_name || '', grade: r.grade || '',
+    schoolId: r.school_id || 0, schoolName: r.resolved_school_name || r.school_name || r.school_name_ref || '', grade: r.grade || '',
     phone: r.phone || '', parentName: r.parent_name || '', parentPhone: r.parent_phone || '', email: r.email || '',
     lessons: safeJson(r.lessons), groupId: r.group_id || undefined,
     assignedSurveys: safeJson(r.assigned_surveys), createdAt: r.created_at || '',
@@ -441,7 +531,91 @@ function ncr(r: any): ClassRoom {
     active: r.active !== false, createdAt: r.created_at || '',
   };
 }
+function nmt(r: any): MemorizationText {
+  return {
+    id: r.id,
+    title: r.title || '',
+    content: r.content || '',
+    active: r.active !== false,
+    createdBy: r.created_by,
+    createdByName: r.created_by_name || '',
+    createdAt: r.created_at || '',
+  };
+}
+function nsq(r: any) {
+  return {
+    id: r.id,
+    surveyId: r.surveyId ?? r.survey_id ?? 0,
+    questionText: r.questionText ?? r.question ?? '',
+    type: surveyTypeFromApi(r.type ?? r.questionType ?? r.question_type ?? 'text'),
+    options: Array.isArray(r.options) ? r.options : safeJson(r.options),
+    sortOrder: r.sortOrder ?? r.sort_order ?? 0,
+  };
+}
+function nsa(r: any) {
+  return {
+    id: r.id,
+    studentId: r.studentId ?? r.student_id,
+    surveyId: r.surveyId ?? r.survey_id,
+    questionId: r.questionId ?? r.question_id,
+    answer: r.answer ?? '',
+    createdAt: r.createdAt ?? r.created_at,
+  };
+}
+function nmtr(r: any): MemorizationTracking {
+  return {
+    id: r.id,
+    studentId: r.student_id,
+    textId: r.text_id,
+    status: r.status || 'not_completed',
+    teacherNote: r.teacher_note || '',
+    checkedBy: r.checked_by,
+    checkedByName: r.checked_by_name || '',
+    checkedAt: r.checked_at || '',
+    createdAt: r.created_at || '',
+    updatedAt: r.updated_at || '',
+  };
+}
 function safeJson(v: any): any[] {
   if (Array.isArray(v)) return v;
   try { return JSON.parse(v || '[]'); } catch { return []; }
+}
+
+function surveyTypeToApi(t: string) {
+  const normalized = String(t || 'text');
+  if (normalized === 'select') return 'single_choice';
+  if (normalized === 'multiselect') return 'multiple_choice';
+  if (normalized === 'test') return 'single_choice';
+  return 'text';
+}
+
+function surveyTypeFromApi(t: string) {
+  const normalized = String(t || 'text');
+  if (normalized === 'single_choice') return 'select';
+  if (normalized === 'multiple_choice') return 'multiselect';
+  return 'text';
+}
+
+function surveyQuestionToApi(q: any) {
+  return {
+    surveyId: q?.surveyId ?? q?.survey_id ?? 0,
+    question: q?.question ?? q?.questionText ?? '',
+    questionType: surveyTypeToApi(q?.questionType ?? q?.type ?? 'text'),
+    options: Array.isArray(q?.options) ? q.options : [],
+    sortOrder: Number(q?.sortOrder ?? q?.sort_order ?? 0),
+  };
+}
+
+function getCurrentRoleFromToken(): string | null {
+  try {
+    const token = localStorage.getItem('ots_token');
+    if (!token) return null;
+    const payloadPart = token.split('.')[1];
+    if (!payloadPart) return null;
+    const json = atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/'));
+    const payload = JSON.parse(json);
+    return payload?.role ?? null;
+  } catch {
+    return null;
+  }
 }

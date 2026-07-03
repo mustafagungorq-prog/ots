@@ -3,6 +3,7 @@ import { useState, useCallback } from 'react';
 const pathParts = window.location.pathname.split('/').filter(Boolean);
 const appRoot = pathParts.length > 0 ? `/${pathParts[0]}` : '';
 const API_BASE = import.meta.env.VITE_API_URL || `${appRoot}/api/index.php`;
+const MAIL_PHP_URL = `${appRoot}/api/config/mail.php`;
 
 function getToken(): string | null {
   return localStorage.getItem('ots_token');
@@ -66,6 +67,24 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 
 export async function apiDelete<T>(path: string): Promise<T> {
   return apiFetch(path, { method: 'DELETE' });
+}
+
+export async function sendMailViaPhp<T>(body: unknown): Promise<T> {
+  const token = getToken();
+  const res = await fetch(MAIL_PHP_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = data?.error || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return data;
 }
 
 export { apiFetch, getToken };
