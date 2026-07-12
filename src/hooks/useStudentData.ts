@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import type {
   Student,
   School,
@@ -16,9 +16,47 @@ import type {
 import { apiGet, apiPost, apiPut, apiDelete } from './useApi';
 
 export function useStudentData() {
-  const [initialized, setInitialized] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // --- Loading flags ---
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [loadingSchools, setLoadingSchools] = useState(false);
+  const [loadingLessons, setLoadingLessons] = useState(false);
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(false);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [loadingReports, setLoadingReports] = useState(false);
+  const [loadingCurriculumTopics, setLoadingCurriculumTopics] = useState(false);
+  const [loadingLessonLogs, setLoadingLessonLogs] = useState(false);
+  const [loadingClassRooms, setLoadingClassRooms] = useState(false);
+  const [loadingSurveys, setLoadingSurveys] = useState(false);
+  const [loadingSurveyQuestions, setLoadingSurveyQuestions] = useState(false);
+  const [loadingSurveyAnswers, setLoadingSurveyAnswers] = useState(false);
+  const [loadingHomeworkTemplates, setLoadingHomeworkTemplates] = useState(false);
+  const [loadingHomeworkAssignments, setLoadingHomeworkAssignments] = useState(false);
+  const [loadingStudentReports, setLoadingStudentReports] = useState(false);
+  const [loadingMemorizationTexts, setLoadingMemorizationTexts] = useState(false);
+  const [loadingMemorizationTracking, setLoadingMemorizationTracking] = useState(false);
 
+  // --- Loaded flags (cache) ---
+  const [loadedStudents, setLoadedStudents] = useState(false);
+  const [loadedSchools, setLoadedSchools] = useState(false);
+  const [loadedLessons, setLoadedLessons] = useState(false);
+  const [loadedAttendance, setLoadedAttendance] = useState(false);
+  const [loadedProgress, setLoadedProgress] = useState(false);
+  const [loadedComments, setLoadedComments] = useState(false);
+  const [loadedReports, setLoadedReports] = useState(false);
+  const [loadedCurriculumTopics, setLoadedCurriculumTopics] = useState(false);
+  const [loadedLessonLogs, setLoadedLessonLogs] = useState(false);
+  const [loadedClassRooms, setLoadedClassRooms] = useState(false);
+  const [loadedSurveys, setLoadedSurveys] = useState(false);
+  const [loadedSurveyQuestions, setLoadedSurveyQuestions] = useState(false);
+  const [loadedSurveyAnswers, setLoadedSurveyAnswers] = useState(false);
+  const [loadedHomeworkTemplates, setLoadedHomeworkTemplates] = useState(false);
+  const [loadedHomeworkAssignments, setLoadedHomeworkAssignments] = useState(false);
+  const [loadedStudentReports, setLoadedStudentReports] = useState(false);
+  const [loadedMemorizationTexts, setLoadedMemorizationTexts] = useState(false);
+  const [loadedMemorizationTracking, setLoadedMemorizationTracking] = useState(false);
+
+  // --- Data states ---
   const [students, setStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
@@ -38,72 +76,204 @@ export function useStudentData() {
   const [memorizationTexts, setMemorizationTexts] = useState<MemorizationText[]>([]);
   const [memorizationTracking, setMemorizationTracking] = useState<MemorizationTracking[]>([]);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  // --- Loaders ---
+  const loadStudents = useCallback(async (force = false) => {
+    if (loadedStudents && !force) return;
+    setLoadingStudents(true);
     try {
-      const role = getCurrentRoleFromToken();
+      const value = await apiGet<any[]>('students');
+      setStudents(value.map(ns));
+      setLoadedStudents(true);
+    } catch (err) { console.error('loadStudents error:', err); }
+    finally { setLoadingStudents(false); }
+  }, [loadedStudents]);
 
-      const requests: Array<[string, Promise<any[]>]> = [
-        ['students', apiGet<any[]>('students')],
-        ['schools', apiGet<any[]>('schools')],
-        ['lessons', apiGet<any[]>('lessons')],
-        ['attendance', apiGet<any[]>('attendance')],
-        ['progress', apiGet<any[]>('progress')],
-        ['comments', apiGet<any[]>('comments')],
-      ];
+  const loadSchools = useCallback(async (force = false) => {
+    if (loadedSchools && !force) return;
+    setLoadingSchools(true);
+    try {
+      const value = await apiGet<any[]>('schools');
+      setSchools(value.map(nsc));
+      setLoadedSchools(true);
+    } catch (err) { console.error('loadSchools error:', err); }
+    finally { setLoadingSchools(false); }
+  }, [loadedSchools]);
 
-      if (role !== 'parent') {
-        requests.push(
-          ['reports', apiGet<any[]>('reports')],
-          ['curriculumTopics', apiGet<any[]>('curriculum-topics')],
-          ['lessonLogs', apiGet<any[]>('lesson-logs')],
-          ['classRooms', apiGet<any[]>('class-rooms')],
-          ['surveys', apiGet<any[]>('surveys')],
-          ['surveyQuestions', apiGet<any[]>('survey-questions')],
-          ['surveyAnswers', apiGet<any[]>('survey-answers')],
-          ['homeworkTemplates', apiGet<any[]>('homework-templates')],
-          ['homeworkAssignments', apiGet<any[]>('homework-assignments')],
-          ['studentReports', apiGet<any[]>('student-reports')],
-          ['memorizationTexts', apiGet<any[]>('memorization-texts')],
-          ['memorizationTracking', apiGet<any[]>('memorization-tracking')],
-        );
-      }
+  const loadLessons = useCallback(async (force = false) => {
+    if (loadedLessons && !force) return;
+    setLoadingLessons(true);
+    try {
+      const value = await apiGet<any[]>('lessons');
+      setLessons(value.map(nl));
+      setLoadedLessons(true);
+    } catch (err) { console.error('loadLessons error:', err); }
+    finally { setLoadingLessons(false); }
+  }, [loadedLessons]);
 
-      const results = await Promise.allSettled(requests.map(([, req]) => req));
+  const loadAttendance = useCallback(async (force = false) => {
+    if (loadedAttendance && !force) return;
+    setLoadingAttendance(true);
+    try {
+      const value = await apiGet<any[]>('attendance');
+      setAttendance(value.map(na));
+      setLoadedAttendance(true);
+    } catch (err) { console.error('loadAttendance error:', err); }
+    finally { setLoadingAttendance(false); }
+  }, [loadedAttendance]);
 
-      results.forEach((result, index) => {
-        if (result.status !== 'fulfilled') return;
-        const key = requests[index][0];
-        const value = result.value;
+  const loadProgress = useCallback(async (force = false) => {
+    if (loadedProgress && !force) return;
+    setLoadingProgress(true);
+    try {
+      const value = await apiGet<any[]>('progress');
+      setProgress(value.map(np));
+      setLoadedProgress(true);
+    } catch (err) { console.error('loadProgress error:', err); }
+    finally { setLoadingProgress(false); }
+  }, [loadedProgress]);
 
-        if (key === 'students') setStudents(value.map(ns));
-        if (key === 'schools') setSchools(value.map(nsc));
-        if (key === 'lessons') setLessons(value.map(nl));
-        if (key === 'attendance') setAttendance(value.map(na));
-        if (key === 'progress') setProgress(value.map(np));
-        if (key === 'comments') setComments(value.map(nco));
-        if (key === 'reports') setReports(value);
-        if (key === 'curriculumTopics') setCurriculumTopics(value.map(nct));
-        if (key === 'lessonLogs') setLessonLogs(value.map(nll));
-        if (key === 'classRooms') setClassRooms(value.map(ncr));
-        if (key === 'surveys') setSurveys(value);
-        if (key === 'surveyQuestions') setSurveyQuestions(value.map(nsq));
-        if (key === 'surveyAnswers') setSurveyAnswers(value.map(nsa));
-        if (key === 'homeworkTemplates') setHomeworkTemplates(value);
-        if (key === 'homeworkAssignments') setHomeworkAssignments(value);
-        if (key === 'studentReports') setStudentReports(value);
-        if (key === 'memorizationTexts') setMemorizationTexts(value.map(nmt));
-        if (key === 'memorizationTracking') setMemorizationTracking(value.map(nmtr));
-      });
-    } catch (err) {
-      console.error('API load error:', err);
-    } finally {
-      setLoading(false);
-      setInitialized(true);
-    }
-  }, []);
+  const loadComments = useCallback(async (force = false) => {
+    if (loadedComments && !force) return;
+    setLoadingComments(true);
+    try {
+      const value = await apiGet<any[]>('comments');
+      setComments(value.map(nco));
+      setLoadedComments(true);
+    } catch (err) { console.error('loadComments error:', err); }
+    finally { setLoadingComments(false); }
+  }, [loadedComments]);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  const loadReports = useCallback(async (force = false) => {
+    if (loadedReports && !force) return;
+    setLoadingReports(true);
+    try {
+      const value = await apiGet<any[]>('reports');
+      setReports(value);
+      setLoadedReports(true);
+    } catch (err) { console.error('loadReports error:', err); }
+    finally { setLoadingReports(false); }
+  }, [loadedReports]);
+
+  const loadCurriculumTopics = useCallback(async (force = false) => {
+    if (loadedCurriculumTopics && !force) return;
+    setLoadingCurriculumTopics(true);
+    try {
+      const value = await apiGet<any[]>('curriculum-topics');
+      setCurriculumTopics(value.map(nct));
+      setLoadedCurriculumTopics(true);
+    } catch (err) { console.error('loadCurriculumTopics error:', err); }
+    finally { setLoadingCurriculumTopics(false); }
+  }, [loadedCurriculumTopics]);
+
+  const loadLessonLogs = useCallback(async (force = false) => {
+    if (loadedLessonLogs && !force) return;
+    setLoadingLessonLogs(true);
+    try {
+      const value = await apiGet<any[]>('lesson-logs');
+      setLessonLogs(value.map(nll));
+      setLoadedLessonLogs(true);
+    } catch (err) { console.error('loadLessonLogs error:', err); }
+    finally { setLoadingLessonLogs(false); }
+  }, [loadedLessonLogs]);
+
+  const loadClassRooms = useCallback(async (force = false) => {
+    if (loadedClassRooms && !force) return;
+    setLoadingClassRooms(true);
+    try {
+      const value = await apiGet<any[]>('class-rooms');
+      setClassRooms(value.map(ncr));
+      setLoadedClassRooms(true);
+    } catch (err) { console.error('loadClassRooms error:', err); }
+    finally { setLoadingClassRooms(false); }
+  }, [loadedClassRooms]);
+
+  const loadSurveys = useCallback(async (force = false) => {
+    if (loadedSurveys && !force) return;
+    setLoadingSurveys(true);
+    try {
+      const value = await apiGet<any[]>('surveys');
+      setSurveys(value);
+      setLoadedSurveys(true);
+    } catch (err) { console.error('loadSurveys error:', err); }
+    finally { setLoadingSurveys(false); }
+  }, [loadedSurveys]);
+
+  const loadSurveyQuestions = useCallback(async (force = false) => {
+    if (loadedSurveyQuestions && !force) return;
+    setLoadingSurveyQuestions(true);
+    try {
+      const value = await apiGet<any[]>('survey-questions');
+      setSurveyQuestions(value.map(nsq));
+      setLoadedSurveyQuestions(true);
+    } catch (err) { console.error('loadSurveyQuestions error:', err); }
+    finally { setLoadingSurveyQuestions(false); }
+  }, [loadedSurveyQuestions]);
+
+  const loadSurveyAnswers = useCallback(async (force = false) => {
+    if (loadedSurveyAnswers && !force) return;
+    setLoadingSurveyAnswers(true);
+    try {
+      const value = await apiGet<any[]>('survey-answers');
+      setSurveyAnswers(value.map(nsa));
+      setLoadedSurveyAnswers(true);
+    } catch (err) { console.error('loadSurveyAnswers error:', err); }
+    finally { setLoadingSurveyAnswers(false); }
+  }, [loadedSurveyAnswers]);
+
+  const loadHomeworkTemplates = useCallback(async (force = false) => {
+    if (loadedHomeworkTemplates && !force) return;
+    setLoadingHomeworkTemplates(true);
+    try {
+      const value = await apiGet<any[]>('homework-templates');
+      setHomeworkTemplates(value);
+      setLoadedHomeworkTemplates(true);
+    } catch (err) { console.error('loadHomeworkTemplates error:', err); }
+    finally { setLoadingHomeworkTemplates(false); }
+  }, [loadedHomeworkTemplates]);
+
+  const loadHomeworkAssignments = useCallback(async (force = false) => {
+    if (loadedHomeworkAssignments && !force) return;
+    setLoadingHomeworkAssignments(true);
+    try {
+      const value = await apiGet<any[]>('homework-assignments');
+      setHomeworkAssignments(value);
+      setLoadedHomeworkAssignments(true);
+    } catch (err) { console.error('loadHomeworkAssignments error:', err); }
+    finally { setLoadingHomeworkAssignments(false); }
+  }, [loadedHomeworkAssignments]);
+
+  const loadStudentReports = useCallback(async (force = false) => {
+    if (loadedStudentReports && !force) return;
+    setLoadingStudentReports(true);
+    try {
+      const value = await apiGet<any[]>('student-reports');
+      setStudentReports(value);
+      setLoadedStudentReports(true);
+    } catch (err) { console.error('loadStudentReports error:', err); }
+    finally { setLoadingStudentReports(false); }
+  }, [loadedStudentReports]);
+
+  const loadMemorizationTexts = useCallback(async (force = false) => {
+    if (loadedMemorizationTexts && !force) return;
+    setLoadingMemorizationTexts(true);
+    try {
+      const value = await apiGet<any[]>('memorization-texts');
+      setMemorizationTexts(value.map(nmt));
+      setLoadedMemorizationTexts(true);
+    } catch (err) { console.error('loadMemorizationTexts error:', err); }
+    finally { setLoadingMemorizationTexts(false); }
+  }, [loadedMemorizationTexts]);
+
+  const loadMemorizationTracking = useCallback(async (force = false) => {
+    if (loadedMemorizationTracking && !force) return;
+    setLoadingMemorizationTracking(true);
+    try {
+      const value = await apiGet<any[]>('memorization-tracking');
+      setMemorizationTracking(value.map(nmtr));
+      setLoadedMemorizationTracking(true);
+    } catch (err) { console.error('loadMemorizationTracking error:', err); }
+    finally { setLoadingMemorizationTracking(false); }
+  }, [loadedMemorizationTracking]);
 
   const _api = (fn: () => Promise<any>) => { fn().catch(e => console.error('API error:', e)); };
 
@@ -112,16 +282,16 @@ export function useStudentData() {
     const newId = Date.now();
     const newStudent = { ...student, id: newId, createdAt: new Date().toISOString().split('T')[0] } as Student;
     setStudents(prev => [...prev, newStudent]);
-    _api(() => apiPost('students', student).then(() => loadAll()));
+    _api(() => apiPost('students', student).then(() => loadStudents(true)));
     return newStudent;
   };
   const updateStudent = (id: number, data: Partial<Student>) => {
     setStudents(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
-    _api(() => apiPut(`students/${id}`, data).then(() => loadAll()));
+    _api(() => apiPut(`students/${id}`, data).then(() => loadStudents(true)));
   };
   const deleteStudent = (id: number) => {
     setStudents(prev => prev.filter(s => s.id !== id));
-    _api(() => apiDelete(`students/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`students/${id}`).then(() => loadStudents(true)));
   };
   const getStudentLessons = (studentId: number) => {
     const s = students.find(x => x.id === studentId);
@@ -133,16 +303,16 @@ export function useStudentData() {
     const newId = Date.now();
     const newSchool = { ...school, id: newId } as School;
     setSchools(prev => [...prev, newSchool]);
-    _api(() => apiPost('schools', school).then(() => loadAll()));
+    _api(() => apiPost('schools', school).then(() => loadSchools(true)));
     return newSchool;
   };
   const updateSchool = (id: number, data: Partial<School>) => {
     setSchools(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
-    _api(() => apiPut(`schools/${id}`, data).then(() => loadAll()));
+    _api(() => apiPut(`schools/${id}`, data).then(() => loadSchools(true)));
   };
   const deleteSchool = (id: number) => {
     setSchools(prev => prev.filter(s => s.id !== id));
-    _api(() => apiDelete(`schools/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`schools/${id}`).then(() => loadSchools(true)));
   };
 
   // --- Lessons ---
@@ -150,16 +320,16 @@ export function useStudentData() {
     const newId = Date.now();
     const newLesson = { ...lesson, id: newId } as Lesson;
     setLessons(prev => [...prev, newLesson]);
-    _api(() => apiPost('lessons', lesson).then(() => loadAll()));
+    _api(() => apiPost('lessons', lesson).then(() => loadLessons(true)));
     return newLesson;
   };
   const updateLesson = (id: number, data: Partial<Lesson>) => {
     setLessons(prev => prev.map(l => l.id === id ? { ...l, ...data } : l));
-    _api(() => apiPut(`lessons/${id}`, data).then(() => loadAll()));
+    _api(() => apiPut(`lessons/${id}`, data).then(() => loadLessons(true)));
   };
   const deleteLesson = (id: number) => {
     setLessons(prev => prev.filter(l => l.id !== id));
-    _api(() => apiDelete(`lessons/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`lessons/${id}`).then(() => loadLessons(true)));
   };
 
   // --- Attendance ---
@@ -167,16 +337,16 @@ export function useStudentData() {
     const newId = Date.now();
     const newA = { ...a, id: newId } as Attendance;
     setAttendance(prev => [...prev, newA]);
-    _api(() => apiPost('attendance', a).then(() => loadAll()));
+    _api(() => apiPost('attendance', a).then(() => loadAttendance(true)));
     return newA;
   };
   const updateAttendanceStatus = (id: number, status: string) => {
     setAttendance(prev => prev.map(a => a.id === id ? { ...a, status: status as any } : a));
-    _api(() => apiPut(`attendance/${id}`, { status }).then(() => loadAll()));
+    _api(() => apiPut(`attendance/${id}`, { status }).then(() => loadAttendance(true)));
   };
   const deleteAttendance = (id: number) => {
     setAttendance(prev => prev.filter(a => a.id !== id));
-    _api(() => apiDelete(`attendance/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`attendance/${id}`).then(() => loadAttendance(true)));
   };
 
   // --- Progress ---
@@ -184,16 +354,16 @@ export function useStudentData() {
     const newId = Date.now();
     const newP = { ...p, id: newId } as Progress;
     setProgress(prev => [...prev, newP]);
-    _api(() => apiPost('progress', p).then(() => loadAll()));
+    _api(() => apiPost('progress', p).then(() => loadProgress(true)));
     return newP;
   };
   const updateProgress = (id: number, data: Partial<Progress>) => {
     setProgress(prev => prev.map(p => p.id === id ? { ...p, ...data } : p));
-    _api(() => apiPut(`progress/${id}`, data).then(() => loadAll()));
+    _api(() => apiPut(`progress/${id}`, data).then(() => loadProgress(true)));
   };
   const deleteProgress = (id: number) => {
     setProgress(prev => prev.filter(p => p.id !== id));
-    _api(() => apiDelete(`progress/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`progress/${id}`).then(() => loadProgress(true)));
   };
 
   // --- Comments ---
@@ -201,12 +371,12 @@ export function useStudentData() {
     const newId = Date.now();
     const newC = { ...c, id: newId, createdAt: new Date().toISOString() } as Comment;
     setComments(prev => [...prev, newC]);
-    _api(() => apiPost('comments', c).then(() => loadAll()));
+    _api(() => apiPost('comments', c).then(() => loadComments(true)));
     return newC;
   };
   const deleteComment = (id: number) => {
     setComments(prev => prev.filter(c => c.id !== id));
-    _api(() => apiDelete(`comments/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`comments/${id}`).then(() => loadComments(true)));
   };
 
   // --- Reports ---
@@ -214,12 +384,12 @@ export function useStudentData() {
     const newId = Date.now();
     const newR = { ...r, id: newId };
     setReports(prev => [...prev, newR]);
-    _api(() => apiPost('reports', r).then(() => loadAll()));
+    _api(() => apiPost('reports', r).then(() => loadReports(true)));
     return newR;
   };
   const deleteReport = (id: number) => {
     setReports(prev => prev.filter(r => r.id !== id));
-    _api(() => apiDelete(`reports/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`reports/${id}`).then(() => loadReports(true)));
   };
   const sendReport = (id: number) => {
     setReports(prev => prev.map(r => r.id === id ? { ...r, status: 'sent', sentAt: new Date().toISOString() } : r));
@@ -230,16 +400,16 @@ export function useStudentData() {
     const newId = Date.now();
     const newRoom = { ...room, id: newId, createdAt: new Date().toISOString().split('T')[0] } as ClassRoom;
     setClassRooms(prev => [...prev, newRoom]);
-    _api(() => apiPost('class-rooms', room).then(() => loadAll()));
+    _api(() => apiPost('class-rooms', room).then(() => loadClassRooms(true)));
     return newRoom;
   };
   const updateClassRoom = (id: number, data: Partial<ClassRoom>) => {
     setClassRooms(prev => prev.map(r => r.id === id ? { ...r, ...data } : r));
-    _api(() => apiPut(`class-rooms/${id}`, data).then(() => loadAll()));
+    _api(() => apiPut(`class-rooms/${id}`, data).then(() => loadClassRooms(true)));
   };
   const deleteClassRoom = (id: number) => {
     setClassRooms(prev => prev.filter(r => r.id !== id));
-    _api(() => apiDelete(`class-rooms/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`class-rooms/${id}`).then(() => loadClassRooms(true)));
   };
   const getClassRoomLessons = (roomId: number) => {
     const room = classRooms.find(r => r.id === roomId);
@@ -287,12 +457,12 @@ export function useStudentData() {
     const newId = Date.now();
     const newT = { ...topic, id: newId } as CurriculumTopic;
     setCurriculumTopics(prev => [...prev, newT]);
-    _api(() => apiPost('curriculum-topics', topic).then(() => loadAll()));
+    _api(() => apiPost('curriculum-topics', topic).then(() => loadCurriculumTopics(true)));
     return newT;
   };
   const deleteCurriculumTopic = (id: number) => {
     setCurriculumTopics(prev => prev.filter(t => t.id !== id));
-    _api(() => apiDelete(`curriculum-topics/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`curriculum-topics/${id}`).then(() => loadCurriculumTopics(true)));
   };
 
   // --- Lesson Logs ---
@@ -300,13 +470,13 @@ export function useStudentData() {
     const newId = Date.now();
     const newL = { ...log, id: newId, createdAt: new Date().toISOString() } as LessonLog;
     setLessonLogs(prev => [...prev, newL]);
-    _api(() => apiPost('lesson-logs', log).then(() => loadAll()));
+    _api(() => apiPost('lesson-logs', log).then(() => loadLessonLogs(true)));
     return newL;
   };
   const getStudentLessonLogs = (studentId: number) => lessonLogs.filter(l => l.studentId === studentId);
   const deleteLessonLog = (id: number) => {
     setLessonLogs(prev => prev.filter(l => l.id !== id));
-    _api(() => apiDelete(`lesson-logs/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`lesson-logs/${id}`).then(() => loadLessonLogs(true)));
   };
 
   // --- Surveys ---
@@ -314,40 +484,40 @@ export function useStudentData() {
     const newId = Date.now();
     const newS = { ...s, id: newId };
     setSurveys(prev => [...prev, newS]);
-    _api(() => apiPost('surveys', s).then(() => loadAll()));
+    _api(() => apiPost('surveys', s).then(() => loadSurveys(true)));
     return newS;
   };
   const updateSurvey = (id: number, data: any) => {
     setSurveys(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
-    _api(() => apiPut(`surveys/${id}`, data).then(() => loadAll()));
+    _api(() => apiPut(`surveys/${id}`, data).then(() => loadSurveys(true)));
   };
   const deleteSurvey = (id: number) => {
     setSurveys(prev => prev.filter(s => s.id !== id));
-    _api(() => apiDelete(`surveys/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`surveys/${id}`).then(() => loadSurveys(true)));
   };
   const addSurveyQuestion = (q: any) => {
     const payload = surveyQuestionToApi(q);
     const newId = Date.now();
     const newQ = { ...nsq(payload), id: newId };
     setSurveyQuestions(prev => [...prev, newQ]);
-    _api(() => apiPost('survey-questions', payload).then(() => loadAll()));
+    _api(() => apiPost('survey-questions', payload).then(() => loadSurveyQuestions(true)));
     return newQ;
   };
   const deleteSurveyQuestion = (id: number) => {
     setSurveyQuestions(prev => prev.filter(q => q.id !== id));
-    _api(() => apiDelete(`survey-questions/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`survey-questions/${id}`).then(() => loadSurveyQuestions(true)));
   };
   const getSurveyQuestions = (surveyId: number) => surveyQuestions.filter(q => q.surveyId === surveyId || q.survey_id === surveyId);
   const addSurveyAnswer = (a: any) => {
     const newId = Date.now();
     const newA = { ...a, id: newId };
     setSurveyAnswers(prev => [...prev, newA]);
-    _api(() => apiPost('survey-answers', a).then(() => loadAll()));
+    _api(() => apiPost('survey-answers', a).then(() => loadSurveyAnswers(true)));
     return newA;
   };
   const deleteSurveyAnswer = (id: number) => {
     setSurveyAnswers(prev => prev.filter(a => a.id !== id));
-    _api(() => apiDelete(`survey-answers/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`survey-answers/${id}`).then(() => loadSurveyAnswers(true)));
   };
 
   // --- Homework ---
@@ -355,22 +525,22 @@ export function useStudentData() {
     const newId = Date.now();
     const newT = { ...t, id: newId };
     setHomeworkTemplates(prev => [...prev, newT]);
-    _api(() => apiPost('homework-templates', t).then(() => loadAll()));
+    _api(() => apiPost('homework-templates', t).then(() => loadHomeworkTemplates(true)));
     return newT;
   };
   const updateHomeworkTemplate = (id: number, data: any) => {
     setHomeworkTemplates(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
-    _api(() => apiPut(`homework-templates/${id}`, data).then(() => loadAll()));
+    _api(() => apiPut(`homework-templates/${id}`, data).then(() => loadHomeworkTemplates(true)));
   };
   const deleteHomeworkTemplate = (id: number) => {
     setHomeworkTemplates(prev => prev.filter(t => t.id !== id));
-    _api(() => apiDelete(`homework-templates/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`homework-templates/${id}`).then(() => loadHomeworkTemplates(true)));
   };
   const addHomeworkAssignment = (a: any) => {
     const newId = Date.now();
     const newA = { ...a, id: newId };
     setHomeworkAssignments(prev => [...prev, newA]);
-    _api(() => apiPost('homework-assignments', a).then(() => loadAll()));
+    _api(() => apiPost('homework-assignments', a).then(() => loadHomeworkAssignments(true)));
     return newA;
   };
   const getStudentHomeworks = (studentId: number) => homeworkAssignments.filter(a => a.studentId === studentId || a.student_id === studentId);
@@ -382,7 +552,7 @@ export function useStudentData() {
   };
   const deleteHomeworkAssignment = (id: number) => {
     setHomeworkAssignments(prev => prev.filter(a => a.id !== id));
-    _api(() => apiDelete(`homework-assignments/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`homework-assignments/${id}`).then(() => loadHomeworkAssignments(true)));
   };
 
   // --- Student Reports ---
@@ -390,13 +560,13 @@ export function useStudentData() {
     const newId = Date.now();
     const newR = { ...r, id: newId };
     setStudentReports(prev => [...prev, newR]);
-    _api(() => apiPost('student-reports', r).then(() => loadAll()));
+    _api(() => apiPost('student-reports', r).then(() => loadStudentReports(true)));
     return newR;
   };
   const getStudentReports = (studentId: number) => studentReports.filter(r => r.student_id === studentId || r.studentId === studentId);
   const deleteStudentReport = (id: number) => {
     setStudentReports(prev => prev.filter(r => r.id !== id));
-    _api(() => apiDelete(`student-reports/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`student-reports/${id}`).then(() => loadStudentReports(true)));
   };
 
   // --- Memorization Texts ---
@@ -404,17 +574,17 @@ export function useStudentData() {
     const newId = Date.now();
     const newText = { ...text, id: newId } as MemorizationText;
     setMemorizationTexts(prev => [newText, ...prev]);
-    _api(() => apiPost('memorization-texts', text).then(() => loadAll()));
+    _api(() => apiPost('memorization-texts', text).then(() => loadMemorizationTexts(true)));
     return newText;
   };
   const updateMemorizationText = (id: number, data: Partial<MemorizationText>) => {
     setMemorizationTexts(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
-    _api(() => apiPut(`memorization-texts/${id}`, data).then(() => loadAll()));
+    _api(() => apiPut(`memorization-texts/${id}`, data).then(() => loadMemorizationTexts(true)));
   };
   const deleteMemorizationText = (id: number) => {
     setMemorizationTexts(prev => prev.filter(t => t.id !== id));
     setMemorizationTracking(prev => prev.filter(r => r.textId !== id));
-    _api(() => apiDelete(`memorization-texts/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`memorization-texts/${id}`).then(() => loadMemorizationTexts(true)));
   };
 
   // --- Memorization Tracking ---
@@ -429,37 +599,42 @@ export function useStudentData() {
       setMemorizationTracking(prev => prev.map(r => r.id === existing.id ? { ...r, status, teacherNote } : r));
     } else {
       setMemorizationTracking(prev => [
-        {
-          id: Date.now(),
-          studentId,
-          textId,
-          status,
-          teacherNote,
-        },
+        { id: Date.now(), studentId, textId, status, teacherNote },
         ...prev,
       ]);
     }
-
-    _api(() => apiPost('memorization-tracking', { studentId, textId, status, teacherNote }).then(() => loadAll()));
+    _api(() => apiPost('memorization-tracking', { studentId, textId, status, teacherNote }).then(() => loadMemorizationTracking(true)));
   };
   const updateMemorizationTracking = (id: number, data: Partial<MemorizationTracking>) => {
     setMemorizationTracking(prev => prev.map(r => r.id === id ? { ...r, ...data } : r));
-    _api(() => apiPut(`memorization-tracking/${id}`, data).then(() => loadAll()));
+    _api(() => apiPut(`memorization-tracking/${id}`, data).then(() => loadMemorizationTracking(true)));
   };
   const deleteMemorizationTracking = (id: number) => {
     setMemorizationTracking(prev => prev.filter(r => r.id !== id));
-    _api(() => apiDelete(`memorization-tracking/${id}`).then(() => loadAll()));
+    _api(() => apiDelete(`memorization-tracking/${id}`).then(() => loadMemorizationTracking(true)));
   };
 
   return {
-    initialized, loading,
+    // data
     students, schools, lessons, attendance, progress, comments, reports,
     surveys, surveyQuestions, surveyAnswers,
     curriculumTopics, lessonLogs, classRooms,
     homeworkTemplates, homeworkAssignments,
     studentReports,
     memorizationTexts, memorizationTracking,
-    refresh: loadAll,
+    // loaders
+    loadStudents, loadSchools, loadLessons, loadAttendance, loadProgress, loadComments,
+    loadReports, loadCurriculumTopics, loadLessonLogs, loadClassRooms,
+    loadSurveys, loadSurveyQuestions, loadSurveyAnswers,
+    loadHomeworkTemplates, loadHomeworkAssignments, loadStudentReports,
+    loadMemorizationTexts, loadMemorizationTracking,
+    // loading flags
+    loadingStudents, loadingSchools, loadingLessons, loadingAttendance, loadingProgress, loadingComments,
+    loadingReports, loadingCurriculumTopics, loadingLessonLogs, loadingClassRooms,
+    loadingSurveys, loadingSurveyQuestions, loadingSurveyAnswers,
+    loadingHomeworkTemplates, loadingHomeworkAssignments, loadingStudentReports,
+    loadingMemorizationTexts, loadingMemorizationTracking,
+    // CRUD helpers
     addStudent, updateStudent, deleteStudent, getStudentLessons,
     addSchool, updateSchool, deleteSchool,
     addLesson, updateLesson, deleteLesson,
@@ -493,8 +668,9 @@ function ns(r: any): Student {
     age: r.age || 0, birthYear: r.birth_year || 0, city: r.city || '',
     schoolId: r.school_id || 0, schoolName: r.resolved_school_name || r.school_name || r.school_name_ref || '', grade: r.grade || '',
     phone: r.phone || '', parentName: r.parent_name || '', parentPhone: r.parent_phone || '', email: r.email || '',
-    lessons: safeJson(r.lessons), groupId: r.group_id || undefined,
-    assignedSurveys: safeJson(r.assigned_surveys), createdAt: r.created_at || '',
+    lessons: Array.isArray(r.lessons) ? r.lessons : safeJson(r.lessons),
+    groupId: r.group_id ?? r.groupId ?? null,
+    createdAt: r.created_at || r.createdAt || '',
   };
 }
 function nsc(r: any): School {
@@ -604,18 +780,4 @@ function surveyQuestionToApi(q: any) {
     options: Array.isArray(q?.options) ? q.options : [],
     sortOrder: Number(q?.sortOrder ?? q?.sort_order ?? 0),
   };
-}
-
-function getCurrentRoleFromToken(): string | null {
-  try {
-    const token = localStorage.getItem('ots_token');
-    if (!token) return null;
-    const payloadPart = token.split('.')[1];
-    if (!payloadPart) return null;
-    const json = atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/'));
-    const payload = JSON.parse(json);
-    return payload?.role ?? null;
-  } catch {
-    return null;
-  }
 }

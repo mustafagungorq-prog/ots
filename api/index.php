@@ -1,4 +1,16 @@
+
 <?php
+
+if (!function_exists('logApiError')) {
+    function logApiError($message) {
+        $logDir = __DIR__ . '/logs';
+        if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
+        $logFile = $logDir . '/error.log';
+        $line = date('Y-m-d H:i:s') . ' ' . $message . PHP_EOL;
+        @file_put_contents($logFile, $line, FILE_APPEND);
+    }
+}
+
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/auth.php';
 
@@ -21,15 +33,27 @@ $resource = $parts[0] ?? '';
 $id = isset($parts[1]) && is_numeric($parts[1]) ? (int)$parts[1] : null;
 $body = json_decode(file_get_contents('php://input'), true) ?: [];
 
+$debugMode = (env('APP_DEBUG') ?: 'false') === 'true';
+
 // Keep production GET flows resilient when hosting DB schema/permissions differ.
-set_exception_handler(function (Throwable $e) use ($method) {
+set_exception_handler(function (Throwable $e) use ($method, $debugMode) {
+    logApiError($e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
     if ($e instanceof PDOException && $method === 'GET') {
         http_response_code(200);
-        json([]);
+        header('Content-Type: application/json; charset=UTF-8');
+        echo json_encode([]);
+        exit;
     }
 
     http_response_code(500);
-    json(['error' => 'Internal Server Error']);
+    header('Content-Type: application/json; charset=UTF-8');
+    $response = ['error' => 'Internal Server Error'];
+    // DEBUG: always expose details until production issue is resolved
+    $response['message'] = $e->getMessage();
+    $response['file'] = $e->getFile();
+    $response['line'] = $e->getLine();
+    echo json_encode($response);
+    exit;
 });
 
 function getParentLinkedStudentIds($parentUser) {

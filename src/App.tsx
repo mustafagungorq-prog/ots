@@ -1,30 +1,132 @@
-import { useEffect } from 'react';
-import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router';
-import { useAuth } from '@/hooks/useAuth';
-import { PERMISSIONS } from '@/types';
+import { useEffect } from "react";
 import {
-  LoginPage, 
-  MainLayout, 
-  AuthGuard, 
-} from './app/shell';
-import { DashboardPage } from './app/pages/DashboardPage.tsx';
-import { StudentFormPage } from './app/pages/StudentFormPage.tsx';
-import { StudentsPage } from './app/pages/StudentsPage.tsx';
-import { SchoolsPage } from './app/pages/SchoolsPage.tsx';
-import { ClassesPage } from './app/pages/ClassesPage.tsx';
-import { LessonsPage } from './app/pages/LessonsPage.tsx';
-import { AttendancePage } from './app/pages/AttendancePage.tsx';
-import { TeacherLessonsPage } from './app/pages/TeacherLessonsPage.tsx';
-import { ProgressPage } from './app/pages/ProgressPage.tsx';
-import { CommentsPage } from './app/pages/CommentsPage.tsx';
-import { ReportsPage } from './app/pages/ReportsPage.tsx';
-import { PermissionsPage } from './app/pages/PermissionsPage.tsx';
-import { UsersPage } from './app/pages/UsersPage.tsx';
-import { SurveyManagementPage } from './app/pages/SurveyManagementPage.tsx';
-import { StudentProfilePage } from './app/pages/StudentProfilePage.tsx';
-import { HomeworkTemplatesPage } from './app/pages/HomeworkTemplatesPage.tsx';
-import { MemorizationTrackingPage } from './app/pages/MemorizationTrackingPage.tsx';
-import { MemorizationTextsAdminPage } from './app/pages/MemorizationTextsAdminPage.tsx';
+  Routes,
+  Route,
+  Navigate,
+  useNavigate,
+  useLocation,
+} from "react-router";
+import { useAuth } from "@/hooks/useAuth";
+import { PERMISSIONS } from "@/types";
+import { LoginPage, MainLayout, AuthGuard } from "./app/shell";
+
+import { DashboardPage } from "./app/pages/DashboardPage";
+import { StudentFormPage } from "./app/pages/StudentFormPage";
+import { StudentsPage } from "./app/pages/StudentsPage";
+import { SchoolsPage } from "./app/pages/SchoolsPage";
+import { ClassesPage } from "./app/pages/ClassesPage";
+import { LessonsPage } from "./app/pages/LessonsPage";
+import { AttendancePage } from "./app/pages/AttendancePage";
+import { TeacherLessonsPage } from "./app/pages/TeacherLessonsPage";
+import { ProgressPage } from "./app/pages/ProgressPage";
+import { CommentsPage } from "./app/pages/CommentsPage";
+import { ReportsPage } from "./app/pages/ReportsPage";
+import { PermissionsPage } from "./app/pages/PermissionsPage";
+import { UsersPage } from "./app/pages/UsersPage";
+import { SurveyManagementPage } from "./app/pages/SurveyManagementPage";
+import { StudentProfilePage } from "./app/pages/StudentProfilePage";
+import { HomeworkTemplatesPage } from "./app/pages/HomeworkTemplatesPage";
+import { MemorizationTrackingPage } from "./app/pages/MemorizationTrackingPage";
+import { MemorizationTextsAdminPage } from "./app/pages/MemorizationTextsAdminPage";
+
+const routeConfig = [
+  {
+    path: "/students",
+    component: StudentsPage,
+    roles: ["superadmin", "admin", "authorized_teacher"],
+  },
+  {
+    path: "/student-form",
+    component: StudentFormPage,
+    roles: PERMISSIONS.STUDENT_CREATE,
+  },
+  {
+    path: "/student-form/:id",
+    component: StudentFormPage,
+    roles: PERMISSIONS.STUDENT_EDIT,
+  },
+  {
+    path: "/schools",
+    component: SchoolsPage,
+    roles: PERMISSIONS.SCHOOL_MANAGE,
+  },
+  {
+    path: "/lessons",
+    component: LessonsPage,
+    roles: PERMISSIONS.LESSON_MANAGE,
+  },
+  {
+    path: "/classes",
+    component: ClassesPage,
+    roles: ["superadmin", "admin", "authorized_teacher"],
+  },
+  {
+    path: "/attendance",
+    component: AttendancePage,
+    roles: ["superadmin", "admin", "authorized_teacher"],
+  },
+  {
+    path: "/progress",
+    component: ProgressPage,
+    roles: PERMISSIONS.PROGRESS_CREATE,
+  },
+  {
+    path: "/teacher-lessons",
+    component: TeacherLessonsPage,
+    roles: ["superadmin"],
+  },
+  {
+    path: "/comments",
+    component: CommentsPage,
+    roles: ["superadmin", "admin", "authorized_teacher"],
+  },
+  {
+    path: "/reports",
+    component: ReportsPage,
+    roles: PERMISSIONS.REPORT_CREATE,
+  },
+  {
+    path: "/permissions",
+    component: PermissionsPage,
+    roles: PERMISSIONS.PERMISSION_MANAGE,
+  },
+  {
+    path: "/users",
+    component: UsersPage,
+    roles: PERMISSIONS.USER_MANAGE,
+  },
+  {
+    path: "/surveys",
+    component: SurveyManagementPage,
+    roles: ["superadmin", "admin"],
+  },
+  {
+    path: "/homework-templates",
+    component: HomeworkTemplatesPage,
+    roles: ["superadmin", "admin"],
+  },
+  {
+    path: "/memorization-tracking",
+    component: MemorizationTrackingPage,
+    roles: PERMISSIONS.MEMORIZATION_TRACK,
+  },
+  {
+    path: "/memorization-texts-admin",
+    component: MemorizationTextsAdminPage,
+    roles: ["superadmin", "admin"],
+  },
+  {
+    path: "/student-profile/:id",
+    component: StudentProfilePage,
+    roles: [
+      "superadmin",
+      "admin",
+      "authorized_teacher",
+      "teacher",
+      "parent",
+    ],
+  },
+];
 
 function AppRouter() {
   const { currentUser } = useAuth();
@@ -33,59 +135,82 @@ function AppRouter() {
 
   useEffect(() => {
     if (!currentUser) return;
+
     const role = currentUser.role;
-    if (role === 'parent') {
+
+    if (role === "parent") {
       const target = `/student-profile/${currentUser.linkedStudentIds?.[0] ?? 0}`;
+
       if (location.pathname !== target) {
         navigate(target, { replace: true });
       }
+
       return;
     }
 
-    if (role === 'teacher') {
-      if (!location.pathname.startsWith('/progress') && !location.pathname.startsWith('/student-profile')) {
-        navigate('/progress', { replace: true });
+    if (role === "teacher") {
+      if (
+        !location.pathname.startsWith("/progress") &&
+        !location.pathname.startsWith("/student-profile")
+      ) {
+        navigate("/progress", { replace: true });
       }
+
       return;
     }
 
-    if (role === 'authorized_teacher' && location.pathname === '/') {
-      navigate('/progress', { replace: true });
+    if (role === "authorized_teacher" && location.pathname === "/") {
+      navigate("/progress", { replace: true });
     }
   }, [currentUser, location.pathname, navigate]);
 
-  if (!currentUser) return <Routes><Route path="/login" element={<LoginPage />} /><Route path="*" element={<Navigate to="/login" />} /></Routes>;
+  if (!currentUser) {
+    return (
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="*" element={<Navigate to="/login" />} />
+      </Routes>
+    );
+  }
+
   return (
     <MainLayout>
       <Routes>
-        <Route path="/" element={
-          currentUser.role === 'superadmin' || currentUser.role === 'admin'
-            ? <DashboardPage />
-            : currentUser.role === 'authorized_teacher' || currentUser.role === 'teacher'
-              ? <Navigate to="/progress" replace />
-              : currentUser.role === 'parent'
-                ? <Navigate to={`/student-profile/${currentUser.linkedStudentIds?.[0] ?? 0}`} replace />
-                : <Navigate to="/students" replace />
-        } />
-        <Route path="/students" element={<AuthGuard requiredRoles={['superadmin', 'admin', 'authorized_teacher']}><StudentsPage /></AuthGuard>} />
-        <Route path="/student-form" element={<AuthGuard requiredRoles={PERMISSIONS.STUDENT_CREATE}><StudentFormPage /></AuthGuard>} />
-        <Route path="/student-form/:id" element={<AuthGuard requiredRoles={PERMISSIONS.STUDENT_EDIT}><StudentFormPage /></AuthGuard>} />
-        <Route path="/schools" element={<AuthGuard requiredRoles={PERMISSIONS.SCHOOL_MANAGE}><SchoolsPage /></AuthGuard>} />
-        <Route path="/lessons" element={<AuthGuard requiredRoles={PERMISSIONS.LESSON_MANAGE}><LessonsPage /></AuthGuard>} />
-        <Route path="/classes" element={<AuthGuard requiredRoles={['superadmin', 'admin', 'authorized_teacher']}><ClassesPage /></AuthGuard>} />
-        <Route path="/attendance" element={<AuthGuard requiredRoles={['superadmin', 'admin', 'authorized_teacher']}><AttendancePage /></AuthGuard>} />
-        <Route path="/progress" element={<AuthGuard requiredRoles={PERMISSIONS.PROGRESS_CREATE}><ProgressPage /></AuthGuard>} />
-        <Route path="/teacher-lessons" element={<AuthGuard requiredRoles={['superadmin']}><TeacherLessonsPage /></AuthGuard>} />
-        <Route path="/comments" element={<AuthGuard requiredRoles={['superadmin', 'admin', 'authorized_teacher']}><CommentsPage /></AuthGuard>} />
-        <Route path="/reports" element={<AuthGuard requiredRoles={PERMISSIONS.REPORT_CREATE}><ReportsPage /></AuthGuard>} />
-        <Route path="/permissions" element={<AuthGuard requiredRoles={PERMISSIONS.PERMISSION_MANAGE}><PermissionsPage /></AuthGuard>} />
-        <Route path="/users" element={<AuthGuard requiredRoles={PERMISSIONS.USER_MANAGE}><UsersPage /></AuthGuard>} />
-        <Route path="/surveys" element={<AuthGuard requiredRoles={['superadmin', 'admin']}><SurveyManagementPage /></AuthGuard>} />
-        <Route path="/homework-templates" element={<AuthGuard requiredRoles={['superadmin', 'admin']}><HomeworkTemplatesPage /></AuthGuard>} />
-        <Route path="/memorization-tracking" element={<AuthGuard requiredRoles={PERMISSIONS.MEMORIZATION_TRACK}><MemorizationTrackingPage /></AuthGuard>} />
-        <Route path="/memorization-texts-admin" element={<AuthGuard requiredRoles={['superadmin', 'admin']}><MemorizationTextsAdminPage /></AuthGuard>} />
-        <Route path="/student-profile/:id" element={<AuthGuard requiredRoles={['superadmin', 'admin', 'authorized_teacher', 'teacher', 'parent']}><StudentProfilePage /></AuthGuard>} />
-        <Route path="*" element={<Navigate to="/" />} />
+        <Route
+          path="/"
+          element={
+            currentUser.role === "superadmin" ||
+            currentUser.role === "admin" ? (
+              <DashboardPage />
+            ) : currentUser.role === "authorized_teacher" ||
+              currentUser.role === "teacher" ? (
+              <Navigate to="/progress" replace />
+            ) : currentUser.role === "parent" ? (
+              <Navigate
+                to={`/student-profile/${
+                  currentUser.linkedStudentIds?.[0] ?? 0
+                }`}
+                replace
+              />
+            ) : (
+              <Navigate to="/students" replace />
+            )
+          }
+        />
+
+        {routeConfig.map(({ path, component: Component, roles }) => (
+          <Route
+            key={path}
+            path={path}
+            element={
+              <AuthGuard requiredRoles={roles}>
+                <Component />
+              </AuthGuard>
+            }
+          />
+        ))}
+
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </MainLayout>
   );

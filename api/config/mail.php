@@ -62,12 +62,12 @@ if (!function_exists('mail_send_phpmailer')) {
 
         $mail = new PHPMailer\PHPMailer\PHPMailer(true);
         $mail->isSMTP();
-        $mail->Host = getenv('MAIL_HOST') ?: 'smtp.hostinger.com';
+        $mail->Host = env('MAIL_HOST') ?: 'smtp.hostinger.com';
         $mail->SMTPAuth = true;
-        $mail->Username = getenv('MAIL_USERNAME') ?: 'info@mektebtakip.com';
-        $mail->Password = getenv('MAIL_PASSWORD') ?: 'Mgngr06.';
+        $mail->Username = env('MAIL_USERNAME') ?: 'info@mektebtakip.com';
+        $mail->Password = env('MAIL_PASSWORD') ?: '';
         $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
-        $mail->Port = (int)(getenv('MAIL_PORT') ?: 465);
+        $mail->Port = (int)(env('MAIL_PORT') ?: 465);
         $mail->CharSet = 'UTF-8';
 
         $mail->setFrom($fromAddress, $fromName);
@@ -107,8 +107,8 @@ if (!function_exists('send_configured_mail')) {
             $text = trim(strip_tags(str_replace(['<br>', '<br/>', '<br />'], "\n", $html)));
         }
 
-        $fromAddress = trim((string)(getenv('MAIL_FROM') ?: 'info@mektebtakip.com'));
-        $fromName = trim((string)(getenv('MAIL_FROM_NAME') ?: '365 Kuran Kuran Mektebi'));
+        $fromAddress = trim((string)(env('MAIL_FROM') ?: 'info@mektebtakip.com'));
+        $fromName = trim((string)(env('MAIL_FROM_NAME') ?: '365 Kuran Kuran Mektebi'));
         $replyTo = trim((string)($payload['replyTo'] ?? ($user['email'] ?? '')));
 
         $sent = false;

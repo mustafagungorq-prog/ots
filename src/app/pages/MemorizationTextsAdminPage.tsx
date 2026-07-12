@@ -1,33 +1,63 @@
-import { useMemo, useState } from 'react';
-import { ListChecks, Pencil, Plus } from 'lucide-react';
-import { useStudentData } from '@/hooks/useStudentData';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Textarea } from '@/components/ui/textarea';
+import { useEffect, useMemo, useState } from "react";
+import { ListChecks, Pencil, Plus } from "lucide-react";
+import { useStudentData } from "@/hooks/useStudentData";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 
 export function MemorizationTextsAdminPage() {
   const data = useStudentData();
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'passive'>('all');
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [activeFilter, setActiveFilter] = useState<
+    "all" | "active" | "passive"
+  >("all");
+
+  useEffect(() => {
+    data.loadMemorizationTexts();
+  }, []);
+  /*
+  if (data.loadingMemorizationTexts) {
+    return <Loading />;
+  }*/
 
   const rows = useMemo(() => {
     let list = data.memorizationTexts;
-    if (activeFilter === 'active') list = list.filter(t => t.active);
-    else if (activeFilter === 'passive') list = list.filter(t => !t.active);
+    if (activeFilter === "active") list = list.filter((t) => t.active);
+    else if (activeFilter === "passive") list = list.filter((t) => !t.active);
     const q = query.trim().toLowerCase();
     if (!q) return list;
     return list.filter(
-      text => text.title.toLowerCase().includes(q) || text.content.toLowerCase().includes(q),
+      (text) =>
+        text.title.toLowerCase().includes(q) ||
+        text.content.toLowerCase().includes(q),
     );
   }, [data.memorizationTexts, query, activeFilter]);
 
@@ -37,13 +67,13 @@ export function MemorizationTextsAdminPage() {
 
   const openCreate = () => {
     setEditingId(null);
-    setTitle('');
-    setContent('');
+    setTitle("");
+    setContent("");
     setDialogOpen(true);
   };
 
   const openEdit = (id: number) => {
-    const text = data.memorizationTexts.find(item => item.id === id);
+    const text = data.memorizationTexts.find((item) => item.id === id);
     if (!text) return;
     setEditingId(id);
     setTitle(text.title);
@@ -57,7 +87,10 @@ export function MemorizationTextsAdminPage() {
     if (!cleanTitle || !cleanContent) return;
 
     if (editingId) {
-      data.updateMemorizationText(editingId, { title: cleanTitle, content: cleanContent });
+      data.updateMemorizationText(editingId, {
+        title: cleanTitle,
+        content: cleanContent,
+      });
     } else {
       data.addMemorizationText({
         title: cleanTitle,
@@ -73,8 +106,12 @@ export function MemorizationTextsAdminPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Ezber Metin Yönetimi</h2>
-          <p className="text-sm text-gray-600 mt-1">Bu ekran sadece admin erişimine açıktır.</p>
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
+            Ezber Metin Yönetimi
+          </h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Bu ekran sadece admin erişimine açıktır.
+          </p>
         </div>
         <Button onClick={openCreate}>
           <Plus size={16} className="mr-1" />
@@ -85,7 +122,9 @@ export function MemorizationTextsAdminPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Ezber Metinleri Grid</CardTitle>
-          <CardDescription>Metin ekleyebilir ve mevcut metinleri güncelleyebilirsiniz.</CardDescription>
+          <CardDescription>
+            Metin ekleyebilir ve mevcut metinleri güncelleyebilirsiniz.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -93,20 +132,20 @@ export function MemorizationTextsAdminPage() {
               <Label className="text-xs">Ara</Label>
               <Input
                 value={query}
-                onChange={e => setQuery(e.target.value)}
+                onChange={(e) => setQuery(e.target.value)}
                 placeholder="Başlık veya içerik ara"
               />
             </div>
             <div className="flex gap-2">
-              {(['all', 'active', 'passive'] as const).map(f => (
+              {(["all", "active", "passive"] as const).map((f) => (
                 <Button
                   key={f}
                   type="button"
                   size="sm"
-                  variant={activeFilter === f ? 'default' : 'outline'}
+                  variant={activeFilter === f ? "default" : "outline"}
                   onClick={() => setActiveFilter(f)}
                 >
-                  {f === 'all' ? 'Tümü' : f === 'active' ? 'Aktif' : 'Pasif'}
+                  {f === "all" ? "Tümü" : f === "active" ? "Aktif" : "Pasif"}
                 </Button>
               ))}
             </div>
@@ -127,36 +166,54 @@ export function MemorizationTextsAdminPage() {
                   <TableRow>
                     <TableCell colSpan={4}>
                       <div className="py-10 text-center text-sm text-gray-500">
-                        <ListChecks size={28} className="mx-auto mb-2 opacity-50" />
+                        <ListChecks
+                          size={28}
+                          className="mx-auto mb-2 opacity-50"
+                        />
                         Kayıt bulunamadı.
                       </div>
                     </TableCell>
                   </TableRow>
                 )}
 
-                {rows.map(text => (
-                  <TableRow key={text.id} className={!text.active ? 'opacity-50' : undefined}>
+                {rows.map((text) => (
+                  <TableRow
+                    key={text.id}
+                    className={!text.active ? "opacity-50" : undefined}
+                  >
                     <TableCell className="font-medium">{text.title}</TableCell>
                     <TableCell className="max-w-[580px]">
-                      <div className="line-clamp-3 whitespace-pre-wrap text-sm text-gray-700">{text.content}</div>
+                      <div className="line-clamp-3 whitespace-pre-wrap text-sm text-gray-700">
+                        {text.content}
+                      </div>
                     </TableCell>
                     <TableCell className="text-center">
                       <div className="flex flex-col items-center gap-1">
                         <Switch
                           checked={text.active}
-                          onCheckedChange={() => toggleActive(text.id, text.active)}
-                          title={text.active ? 'Pasife al' : 'Aktife al'}
+                          onCheckedChange={() =>
+                            toggleActive(text.id, text.active)
+                          }
+                          title={text.active ? "Pasife al" : "Aktife al"}
                         />
                         <Badge
                           variant="outline"
-                          className={text.active ? 'border-green-400 text-green-700 text-[10px]' : 'border-gray-300 text-gray-400 text-[10px]'}
+                          className={
+                            text.active
+                              ? "border-green-400 text-green-700 text-[10px]"
+                              : "border-gray-300 text-gray-400 text-[10px]"
+                          }
                         >
-                          {text.active ? 'Aktif' : 'Pasif'}
+                          {text.active ? "Aktif" : "Pasif"}
                         </Badge>
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="outline" size="sm" onClick={() => openEdit(text.id)}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEdit(text.id)}
+                      >
                         <Pencil size={14} className="mr-1" />
                         Güncelle
                       </Button>
@@ -172,19 +229,30 @@ export function MemorizationTextsAdminPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>{editingId ? 'Ezber Metni Güncelle' : 'Yeni Ezber Metni Ekle'}</DialogTitle>
+            <DialogTitle>
+              {editingId ? "Ezber Metni Güncelle" : "Yeni Ezber Metni Ekle"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 pt-2">
             <div className="space-y-1">
               <Label className="text-xs">Başlık</Label>
-              <Input value={title} onChange={e => setTitle(e.target.value)} placeholder="Başlık" />
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Başlık"
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Metin</Label>
-              <Textarea value={content} onChange={e => setContent(e.target.value)} rows={8} placeholder="Ezber metni" />
+              <Textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={8}
+                placeholder="Ezber metni"
+              />
             </div>
             <Button className="w-full" onClick={save}>
-              {editingId ? 'Güncelle' : 'Ekle'}
+              {editingId ? "Güncelle" : "Ekle"}
             </Button>
           </div>
         </DialogContent>

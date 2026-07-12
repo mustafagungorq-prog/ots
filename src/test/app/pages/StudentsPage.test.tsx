@@ -5,6 +5,14 @@ import { StudentsPage } from '@/app/pages/StudentsPage';
 const navigateMock = vi.fn();
 
 const studentData = {
+  loadingStudents: false,
+  loadingSchools: false,
+  loadingLessons: false,
+  loadingClassRooms: false,
+  loadStudents: vi.fn(),
+  loadSchools: vi.fn(),
+  loadLessons: vi.fn(),
+  loadClassRooms: vi.fn(),
   students: [
     {
       id: 1,

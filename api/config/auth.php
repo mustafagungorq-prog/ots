@@ -29,8 +29,11 @@ class JWT {
 }
 
 function getAuthUser() {
-    $headers = getallheaders();
-    $auth = isset($headers['Authorization']) ? $headers['Authorization'] : '';
+    $auth = '';
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        $auth = isset($headers['Authorization']) ? $headers['Authorization'] : '';
+    }
     if (!$auth && isset($_SERVER['HTTP_AUTHORIZATION'])) $auth = $_SERVER['HTTP_AUTHORIZATION'];
     if (!$auth && isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) $auth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
     if (!$auth) { http_response_code(401); echo json_encode(['error' => 'Unauthorized']); exit; }
