@@ -104,7 +104,8 @@ import { useAuth } from "@/hooks/useAuth";
 import type {
   Student,
   School,
-  Lesson,
+  Course,
+  CourseSchedule,
   Attendance,
   User,
   UserRole,
@@ -173,13 +174,25 @@ export function LessonsPage() {
   const { canViewColumn, users, usersLoaded, refreshUsers } = useAuth();
 
   const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<Lesson | null>(null);
-  const [form, setForm] = useState<Partial<Lesson>>({});
-  const [selectedLesson, setSelectedLesson] = useState<number | null>(null);
+  const [editing, setEditing] = useState<CourseSchedule | null>(null);
+  const [form, setForm] = useState<Partial<CourseSchedule>>({});
+  const [selectedSchedule, setSelectedSchedule] = useState<number | null>(null);
   const [gradeFilter, setGradeFilter] = useState("");
+  const [courseOpen, setCourseOpen] = useState(false);
+  const [editingCourse, setEditingCourse] = useState<Course | null>(null);
+  const [courseForm, setCourseForm] = useState<Partial<Course>>({});
+
+  // Toplu kurs atama state'leri
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignCourseId, setAssignCourseId] = useState<string>("");
+  const [assignSearch, setAssignSearch] = useState("");
+  const [assignOnlyUnassigned, setAssignOnlyUnassigned] = useState(true);
+  const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
 
   useEffect(() => {
     data.loadLessons();
+    data.loadCourseSchedules();
+    data.loadClassRooms();
     data.loadStudents();
     data.loadSchools();
     refreshUsers();
@@ -200,63 +213,145 @@ export function LessonsPage() {
   );
   const handleSubmit = () => {
     if (
-      !form.name ||
-      !form.teacher ||
+      !form.courseId ||
       !form.dayOfWeek ||
       !form.startTime ||
       !form.endTime
     )
       return;
-    if (editing) data.updateLesson(editing.id, form);
-    else data.addLesson(form as Omit<Lesson, "id">);
+    const payload = {
+      ...form,
+      courseId: Number(form.courseId),
+      teacherId: form.teacherId ? Number(form.teacherId) : null,
+      classRoomId: form.classRoomId ? Number(form.classRoomId) : null,
+    };
+    if (editing) data.updateCourseSchedule(editing.id, payload);
+    else data.addCourseSchedule(payload as Omit<CourseSchedule, "id">);
     setOpen(false);
     setEditing(null);
     setForm({});
   };
+  const handleCourseSubmit = () => {
+    if (!courseForm.name) return;
+    if (editingCourse) data.updateCourse(editingCourse.id, courseForm);
+    else data.addCourse(courseForm as Omit<Course, "id">);
+    setCourseOpen(false);
+    setEditingCourse(null);
+    setCourseForm({});
+  };
   const studentsInLesson = useMemo(() => {
-    if (!selectedLesson) return [];
+    if (!selectedSchedule) return [];
+    const schedule = data.courseSchedules.find((s) => s.id === selectedSchedule);
+    if (!schedule) return [];
     return data.students.filter(
       (s) =>
-        s.lessons.includes(selectedLesson) &&
+        s.lessons.includes(schedule.courseId) &&
         (!gradeFilter || s.grade === gradeFilter),
     );
-  }, [selectedLesson, gradeFilter, data.students]);
+  }, [selectedSchedule, gradeFilter, data.students, data.courseSchedules]);
+
+  const assignStudents = useMemo(() => {
+    const courseId = assignCourseId ? Number(assignCourseId) : null;
+    return data.students
+      .filter((s) => {
+        const matchesSearch = `${s.firstName} ${s.lastName}`
+          .toLowerCase()
+          .includes(assignSearch.toLowerCase());
+        if (!matchesSearch) return false;
+        if (assignOnlyUnassigned && courseId && s.lessons.includes(courseId))
+          return false;
+        return true;
+      })
+      .sort((a, b) =>
+        `${a.firstName} ${a.lastName}`.localeCompare(
+          `${b.firstName} ${b.lastName}`,
+          "tr",
+        ),
+      );
+  }, [data.students, assignSearch, assignOnlyUnassigned, assignCourseId]);
+
+  const toggleStudentSelection = (sid: number) => {
+    setSelectedStudentIds((prev) =>
+      prev.includes(sid) ? prev.filter((id) => id !== sid) : [...prev, sid],
+    );
+  };
+
+  const selectAllAssignStudents = () => {
+    setSelectedStudentIds(assignStudents.map((s) => s.id));
+  };
+
+  const deselectAllAssignStudents = () => {
+    setSelectedStudentIds([]);
+  };
+
+  const handleAssignCourse = () => {
+    if (!assignCourseId || selectedStudentIds.length === 0) return;
+    data.assignCourseToStudents(Number(assignCourseId), selectedStudentIds);
+    setAssignOpen(false);
+    setAssignCourseId("");
+    setAssignSearch("");
+    setSelectedStudentIds([]);
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex justify-between">
-        <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Dersler</h2>
-        <Button
-          onClick={() => {
-            setEditing(null);
-            setForm({});
-            setOpen(true);
-          }}
-        >
-          <Plus size={18} className="mr-1" /> Ders Ekle
-        </Button>
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Ders Planları</h2>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setEditingCourse(null);
+              setCourseForm({});
+              setCourseOpen(true);
+            }}
+          >
+            <BookMarked size={18} className="mr-1" /> Kurs Yönetimi
+          </Button>
+          <Button
+            onClick={() => {
+              setEditing(null);
+              setForm({});
+              setOpen(true);
+            }}
+          >
+            <Plus size={18} className="mr-1" /> Ders Planı Ekle
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setAssignCourseId("");
+              setAssignSearch("");
+              setSelectedStudentIds([]);
+              setAssignOpen(true);
+            }}
+          >
+            <Users size={18} className="mr-1" /> Öğrencilere Kurs Ata
+          </Button>
+        </div>
       </div>
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Ders Listesi (tıklayın)</CardTitle>
+          <CardTitle className="text-base">Ders Planı Listesi (tıklayın)</CardTitle>
         </CardHeader>
         <CardContent className="p-0 overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 {canViewColumn("lessons", "name") && (
-                  <TableHead className="text-xs">Ders</TableHead>
+                  <TableHead className="text-xs">Kurs</TableHead>
                 )}
                 {canViewColumn("lessons", "teacher") && (
                   <TableHead className="text-xs">Öğretmen</TableHead>
+                )}
+                {canViewColumn("lessons", "classRoom") && (
+                  <TableHead className="text-xs">Sınıf</TableHead>
                 )}
                 {canViewColumn("lessons", "dayOfWeek") && (
                   <TableHead className="text-xs">Gün</TableHead>
                 )}
                 {canViewColumn("lessons", "time") && (
                   <TableHead className="text-xs">Saat</TableHead>
-                )}
-                {canViewColumn("lessons", "description") && (
-                  <TableHead className="text-xs">Açıklama</TableHead>
                 )}
                 {canViewColumn("lessons", "studentCount") && (
                   <TableHead className="text-xs">Öğrenci</TableHead>
@@ -267,36 +362,35 @@ export function LessonsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.lessons.map((l) => {
-                const c = data.students.filter((s) =>
-                  s.lessons.includes(l.id),
+              {data.courseSchedules.map((s) => {
+                const c = data.students.filter((st) =>
+                  st.lessons.includes(s.courseId),
                 ).length;
-                const sel = selectedLesson === l.id;
+                const classRoom = data.classRooms.find((r) => r.id === s.classRoomId);
+                const sel = selectedSchedule === s.id;
                 return (
                   <TableRow
-                    key={l.id}
-                    onClick={() => setSelectedLesson(sel ? null : l.id)}
+                    key={s.id}
+                    onClick={() => setSelectedSchedule(sel ? null : s.id)}
                     className={`cursor-pointer transition-colors ${sel ? "bg-emerald-50 border-l-4 border-l-emerald-500" : "hover:bg-gray-50"}`}
                   >
                     {canViewColumn("lessons", "name") && (
                       <TableCell className="font-medium text-sm">
-                        {l.name}
+                        {s.name}
                       </TableCell>
                     )}
                     {canViewColumn("lessons", "teacher") && (
-                      <TableCell className="text-sm">{l.teacher}</TableCell>
+                      <TableCell className="text-sm">{s.teacher}</TableCell>
+                    )}
+                    {canViewColumn("lessons", "classRoom") && (
+                      <TableCell className="text-sm">{classRoom?.name || "-"}</TableCell>
                     )}
                     {canViewColumn("lessons", "dayOfWeek") && (
-                      <TableCell className="text-sm">{l.dayOfWeek}</TableCell>
+                      <TableCell className="text-sm">{s.dayOfWeek}</TableCell>
                     )}
                     {canViewColumn("lessons", "time") && (
                       <TableCell className="text-xs">
-                        {l.startTime}-{l.endTime}
-                      </TableCell>
-                    )}
-                    {canViewColumn("lessons", "description") && (
-                      <TableCell className="text-sm max-w-[150px] truncate text-gray-500">
-                        {l.description}
+                        {s.startTime}-{s.endTime}
                       </TableCell>
                     )}
                     {canViewColumn("lessons", "studentCount") && (
@@ -315,8 +409,8 @@ export function LessonsPage() {
                             className="h-8 w-8"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setEditing(l);
-                              setForm(l);
+                              setEditing(s);
+                              setForm(s);
                               setOpen(true);
                             }}
                           >
@@ -328,10 +422,10 @@ export function LessonsPage() {
                             className="h-8 w-8"
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (confirm("Ders silinsin mi?")) {
-                                data.deleteLesson(l.id);
-                                if (selectedLesson === l.id)
-                                  setSelectedLesson(null);
+                              if (confirm("Ders planı silinsin mi?")) {
+                                data.deleteCourseSchedule(s.id);
+                                if (selectedSchedule === s.id)
+                                  setSelectedSchedule(null);
                               }
                             }}
                           >
@@ -347,12 +441,12 @@ export function LessonsPage() {
           </Table>
         </CardContent>
       </Card>
-      {selectedLesson && (
+      {selectedSchedule && (
         <Card className="border-2 border-emerald-200">
           <CardHeader className="pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <CardTitle className="text-base text-emerald-700">
-                {data.lessons.find((l) => l.id === selectedLesson)?.name} -
+                {data.courseSchedules.find((s) => s.id === selectedSchedule)?.name} -
                 Kayıtlı Öğrenciler
               </CardTitle>
               <CardDescription>
@@ -460,29 +554,60 @@ export function LessonsPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editing ? "Ders Düzenle" : "Yeni Ders"}</DialogTitle>
+            <DialogTitle>{editing ? "Ders Planı Düzenle" : "Yeni Ders Planı"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 pt-4">
             <div className="space-y-1">
-              <Label className="text-xs">Ders Adı</Label>
-              <Input
-                value={form.name || ""}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
+              <Label className="text-xs">Kurs</Label>
+              <Select
+                value={String(form.courseId || "")}
+                onValueChange={(v) => setForm({ ...form, courseId: Number(v) })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Kurs seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  {data.lessons.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Öğretmen</Label>
               <Select
-                value={form.teacher || ""}
-                onValueChange={(v) => setForm({ ...form, teacher: v })}
+                value={String(form.teacherId || "")}
+                onValueChange={(v) => setForm({ ...form, teacherId: v ? Number(v) : null })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Öğretmen seçin" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="">Seçilmedi</SelectItem>
                   {teachers.map((t) => (
-                    <SelectItem key={t.id} value={t.fullName || t.username}>
+                    <SelectItem key={t.id} value={String(t.id)}>
                       {t.fullName || t.username}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Sınıf</Label>
+              <Select
+                value={String(form.classRoomId || "")}
+                onValueChange={(v) => setForm({ ...form, classRoomId: v ? Number(v) : null })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Sınıf seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Seçilmedi</SelectItem>
+                  {data.classRooms.map((r) => (
+                    <SelectItem key={r.id} value={String(r.id)}>
+                      {r.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -528,18 +653,231 @@ export function LessonsPage() {
                 />
               </div>
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Açıklama</Label>
-              <Textarea
-                value={form.description || ""}
-                onChange={(e) =>
-                  setForm({ ...form, description: e.target.value })
-                }
-              />
-            </div>
             <Button onClick={handleSubmit} className="w-full">
               {editing ? "Güncelle" : "Ekle"}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={courseOpen} onOpenChange={setCourseOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Kurs Yönetimi</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                placeholder="Kurs adı"
+                value={courseForm.name || ""}
+                onChange={(e) => setCourseForm({ ...courseForm, name: e.target.value })}
+              />
+              <Input
+                placeholder="Açıklama"
+                value={courseForm.description || ""}
+                onChange={(e) => setCourseForm({ ...courseForm, description: e.target.value })}
+              />
+              <div className="flex gap-2">
+                <Button onClick={handleCourseSubmit}>
+                  {editingCourse ? "Güncelle" : "Ekle"}
+                </Button>
+                {editingCourse && (
+                  <Button variant="outline" onClick={() => { setEditingCourse(null); setCourseForm({}); }}>
+                    İptal
+                  </Button>
+                )}
+              </div>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Kurs</TableHead>
+                  <TableHead>Açıklama</TableHead>
+                  <TableHead>İşlem</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.lessons.map((c) => (
+                  <TableRow key={c.id}>
+                    <TableCell className="font-medium text-sm">{c.name}</TableCell>
+                    <TableCell className="text-sm text-gray-500">{c.description || "-"}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" onClick={() => { setEditingCourse(c); setCourseForm(c); }}>
+                          <Pencil size={14} />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => { if (confirm("Kurs silinsin mi?")) data.deleteCourse(c.id); }}>
+                          <Trash2 size={14} className="text-red-500" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Toplu Kurs Atama Dialog */}
+      <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Öğrencilere Kurs Ata</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <div className="flex flex-col sm:flex-row gap-3 items-end">
+              <div className="space-y-1 w-full sm:w-64">
+                <Label className="text-xs">Kurs</Label>
+                <Select
+                  value={assignCourseId || "none"}
+                  onValueChange={(v) => {
+                    setAssignCourseId(v === "none" ? "" : v);
+                    setSelectedStudentIds([]);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Kurs seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Kurs seçin</SelectItem>
+                    {data.lessons.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 w-full sm:w-64">
+                <Label className="text-xs">Öğrenci Ara</Label>
+                <div className="relative">
+                  <Search
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                    size={18}
+                  />
+                  <Input
+                    placeholder="İsim ara..."
+                    value={assignSearch}
+                    onChange={(e) => setAssignSearch(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pb-1">
+                <Switch
+                  id="only-unassigned"
+                  checked={assignOnlyUnassigned}
+                  onCheckedChange={setAssignOnlyUnassigned}
+                />
+                <Label htmlFor="only-unassigned" className="text-xs cursor-pointer">
+                  Sadece atanmamış öğrenciler
+                </Label>
+              </div>
+            </div>
+
+            {assignCourseId && (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm text-gray-600">
+                    {assignStudents.length} öğrenci listeleniyor
+                    {selectedStudentIds.length > 0 &&
+                      ` • ${selectedStudentIds.length} seçili`}
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={selectAllAssignStudents}
+                    >
+                      Tümünü Seç
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={deselectAllAssignStudents}
+                    >
+                      Seçimi Kaldır
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-10"></TableHead>
+                        <TableHead className="text-xs">Öğrenci</TableHead>
+                        <TableHead className="text-xs">Sınıf</TableHead>
+                        <TableHead className="text-xs">Mevcut Kurslar</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {assignStudents.map((s) => {
+                        const courseNames = s.lessons
+                          .map(
+                            (id) => data.lessons.find((c) => c.id === id)?.name,
+                          )
+                          .filter(Boolean)
+                          .join(", ");
+                        return (
+                          <TableRow key={s.id}>
+                            <TableCell>
+                              <input
+                                type="checkbox"
+                                checked={selectedStudentIds.includes(s.id)}
+                                onChange={() => toggleStudentSelection(s.id)}
+                                className="h-4 w-4 rounded border-gray-300"
+                              />
+                            </TableCell>
+                            <TableCell className="text-sm font-medium">
+                              {s.firstName} {s.lastName}
+                            </TableCell>
+                            <TableCell className="text-xs">{s.grade}</TableCell>
+                            <TableCell className="text-xs text-gray-500">
+                              {courseNames || "-"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      {assignStudents.length === 0 && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-center py-6 text-sm text-gray-500"
+                          >
+                            {assignOnlyUnassigned
+                              ? "Bu kursa atanmamış öğrenci bulunamadı"
+                              : "Öğrenci bulunamadı"}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setAssignOpen(false);
+                  setAssignCourseId("");
+                  setAssignSearch("");
+                  setSelectedStudentIds([]);
+                }}
+              >
+                İptal
+              </Button>
+              <Button
+                onClick={handleAssignCourse}
+                disabled={!assignCourseId || selectedStudentIds.length === 0}
+              >
+                {selectedStudentIds.length > 0
+                  ? `${selectedStudentIds.length} Öğrenciye Ata`
+                  : "Öğrenci Seçin"}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

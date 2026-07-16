@@ -175,7 +175,7 @@ export function ReportsPage() {
 
   useEffect(() => {
     data.loadStudents();
-    data.loadLessons();
+    data.loadClassRooms();
     data.loadProgress();
     data.loadAttendance();
     data.loadSchools();
@@ -184,7 +184,7 @@ export function ReportsPage() {
   }, []);
 
   const [selStudent, setSelStudent] = useState("");
-  const [selLesson, setSelLesson] = useState("");
+  const [selClassRoom, setSelClassRoom] = useState("");
   const [selGrade, setSelGrade] = useState("");
   const [reportType, setReportType] = useState<"daily" | "weekly" | "monthly">(
     "daily",
@@ -197,16 +197,16 @@ export function ReportsPage() {
     [data.students],
   );
   const filteredStudents = useMemo(() => {
-    const lessonFilterActive = !!selLesson;
-    const lessonId = lessonFilterActive ? Number(selLesson) : null;
+    const classRoomFilterActive = !!selClassRoom;
+    const classRoomId = classRoomFilterActive ? Number(selClassRoom) : null;
     const gradeFilterActive = !!selGrade;
     return data.students.filter((s) => {
-      if (lessonFilterActive && lessonId && !s.lessons.includes(lessonId))
+      if (classRoomFilterActive && classRoomId && s.groupId !== classRoomId)
         return false;
       if (gradeFilterActive && s.grade !== selGrade) return false;
       return true;
     });
-  }, [selLesson, selGrade, data.students]);
+  }, [selClassRoom, selGrade, data.students]);
   const generateReport = () => {
     if (!selStudent) return;
     const st = data.students.find((s) => s.id === Number(selStudent));
@@ -318,22 +318,22 @@ export function ReportsPage() {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1">
-              <Label className="text-xs">Ders Filtresi</Label>
+              <Label className="text-xs">Sınıf Filtresi</Label>
               <Select
-                value={selLesson || "all"}
+                value={selClassRoom || "all"}
                 onValueChange={(v) => {
-                  setSelLesson(v === "all" ? "" : v);
+                  setSelClassRoom(v === "all" ? "" : v);
                   setSelStudent("");
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Ders (opsiyonel)" />
+                  <SelectValue placeholder="Sınıf (opsiyonel)" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tümü</SelectItem>
-                  {data.lessons.map((l) => (
-                    <SelectItem key={l.id} value={String(l.id)}>
-                      {l.name}
+                  {data.classRooms.map((r) => (
+                    <SelectItem key={r.id} value={String(r.id)}>
+                      {r.name} ({r.grade})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -368,7 +368,7 @@ export function ReportsPage() {
                   <SelectValue placeholder="Öğrenci seçin" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(selLesson || selGrade
+                  {(selClassRoom || selGrade
                     ? filteredStudents
                     : data.students
                   ).map((s) => (

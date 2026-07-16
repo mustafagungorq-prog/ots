@@ -64,6 +64,9 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import {
@@ -199,27 +202,49 @@ export function DashboardPage() {
   const today = new Date().toISOString().split("T")[0];
   const todayAtt = data.attendance.filter((a) => a.date === today);
 
-  const monthlyStudents = useMemo(() => {
-    const map: Record<string, number> = {};
-    data.students.forEach((s) => {
-      const key = getMonthKey(s.createdAt);
-      map[key] = (map[key] || 0) + 1;
-    });
-    return Object.entries(map)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, count]) => ({ month: getMonthName(key), key, count }));
-  }, [data.students]);
+  // Son 30 günün tarih listesini hazirla
+  const last30Days = useMemo(() => {
+    const list: string[] = [];
+    const today = new Date();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      list.push(d.toISOString().split("T")[0]);
+    }
+    return list;
+  }, []);
 
-  const monthlyLessons = useMemo(() => {
+  const dailyStudents = useMemo(() => {
     const map: Record<string, number> = {};
     data.students.forEach((s) => {
-      const key = getMonthKey(s.createdAt);
-      map[key] = (map[key] || 0) + s.lessons.length;
+      const date = new Date(s.createdAt).toISOString().split("T")[0];
+      map[date] = (map[date] || 0) + 1;
     });
-    return Object.entries(map)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, count]) => ({ month: getMonthName(key), key, count }));
-  }, [data.students]);
+    return last30Days.map((date) => ({
+      date,
+      label: new Date(date).toLocaleDateString("tr-TR", {
+        day: "2-digit",
+        month: "short",
+      }),
+      count: map[date] || 0,
+    }));
+  }, [data.students, last30Days]);
+
+  const dailyLessons = useMemo(() => {
+    const map: Record<string, number> = {};
+    data.students.forEach((s) => {
+      const date = new Date(s.createdAt).toISOString().split("T")[0];
+      map[date] = (map[date] || 0) + s.lessons.length;
+    });
+    return last30Days.map((date) => ({
+      date,
+      label: new Date(date).toLocaleDateString("tr-TR", {
+        day: "2-digit",
+        month: "short",
+      }),
+      count: map[date] || 0,
+    }));
+  }, [data.students, last30Days]);
 
   const pcd = useMemo(() => {
     if (!ps) return [];
@@ -238,6 +263,41 @@ export function DashboardPage() {
   }, [ps, psStart, psEnd, data.progress]);
 
   // Ogretmen-ders istatistigi (admin/superadmin icin)
+  const groupDistribution = useMemo(() => {
+    return data.classRooms
+      .filter((c) => c.active)
+      .map((c) => ({
+        name: c.name,
+        value: data.students.filter((s) => s.groupId === c.id).length,
+      }))
+      .filter((d) => d.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [data.classRooms, data.students]);
+
+  const courseDistribution = useMemo(() => {
+    return data.lessons
+      .filter((c) => c.active !== false)
+      .map((c) => ({
+        name: c.name,
+        value: data.students.filter((s) => s.lessons.includes(c.id)).length,
+      }))
+      .filter((d) => d.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [data.lessons, data.students]);
+
+  const PIE_COLORS = [
+    "#dcee7f",
+    "#56b2c7",
+    "#f59e0b",
+    "#ef4444",
+    "#3b82f6",
+    "#ec4899",
+    "#14b8a6",
+    "#f97316",
+    "#6366f1",
+    "#84cc16",
+  ];
+
   const teacherStats = useMemo(() => {
     if (
       !currentUser ||
@@ -402,13 +462,13 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <BarChart3 size={18} /> Aylık Öğrenci
+              <BarChart3 size={18} /> Günlük Öğrenci Kaydı (Son 30 Gün)
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={monthlyStudents}>
+                <AreaChart data={dailyStudents}>
                   <defs>
                     <linearGradient id="cs" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.8} />
@@ -417,14 +477,20 @@ export function DashboardPage() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
-                    dataKey="month"
-                    tick={{ fontSize: 10 }}
-                    angle={-30}
+                    dataKey="label"
+                    tick={{ fontSize: 9 }}
+                    angle={-45}
                     textAnchor="end"
-                    height={50}
+                    height={55}
+                    interval={2}
                   />
                   <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                  <Tooltip />
+                  <Tooltip
+                    labelFormatter={(label) => {
+                      const item = dailyStudents.find((d) => d.label === label);
+                      return item ? item.date : label;
+                    }}
+                  />
                   <Area
                     type="monotone"
                     dataKey="count"
@@ -441,13 +507,13 @@ export function DashboardPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <BarChart3 size={18} /> Aylık Ders Kaydı
+              <BarChart3 size={18} /> Günlük Ders Kaydı (Son 30 Gün)
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={monthlyLessons}>
+                <AreaChart data={dailyLessons}>
                   <defs>
                     <linearGradient id="cl" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.8} />
@@ -456,14 +522,20 @@ export function DashboardPage() {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
-                    dataKey="month"
-                    tick={{ fontSize: 10 }}
-                    angle={-30}
+                    dataKey="label"
+                    tick={{ fontSize: 9 }}
+                    angle={-45}
                     textAnchor="end"
-                    height={50}
+                    height={55}
+                    interval={2}
                   />
                   <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                  <Tooltip />
+                  <Tooltip
+                    labelFormatter={(label) => {
+                      const item = dailyLessons.find((d) => d.label === label);
+                      return item ? item.date : label;
+                    }}
+                  />
                   <Area
                     type="monotone"
                     dataKey="count"
@@ -478,6 +550,88 @@ export function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <UsersRound size={18} /> Gruplardaki Öğrenci Sayısı
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={groupDistribution}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    label={({ name, percent }) =>
+                      `${name}: ${(percent * 100).toFixed(0)}%`
+                    }
+                  >
+                    {groupDistribution.map((_, index) => (
+                      <Cell
+                        key={`cell-group-${index}`}
+                        fill={PIE_COLORS[index % PIE_COLORS.length]}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value: number, name: string) => [
+                      `${value} öğrenci`,
+                      name,
+                    ]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <BookOpen size={18} /> Kurslardaki Öğrenci Sayısı
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={courseDistribution}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    label={({ name, percent }) =>
+                      `${name}: ${(percent * 100).toFixed(0)}%`
+                    }
+                  >
+                    {courseDistribution.map((_, index) => (
+                      <Cell
+                        key={`cell-course-${index}`}
+                        fill={PIE_COLORS[index % PIE_COLORS.length]}
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value: number, name: string) => [
+                      `${value} öğrenci`,
+                      name,
+                    ]}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">

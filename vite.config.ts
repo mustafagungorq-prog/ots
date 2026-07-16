@@ -11,8 +11,8 @@ export default defineConfig({
     port: 3000,
   },
   build: {
-    sourcemap: true,
-    minify: false,
+    sourcemap: false,
+    minify: true,
   },
   
   resolve: {

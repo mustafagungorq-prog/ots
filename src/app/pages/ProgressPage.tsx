@@ -52,6 +52,8 @@ import {
   AlertTriangle,
   Printer,
   Info,
+  ChevronsUpDown,
+  Check,
 } from "lucide-react";
 import {
   AreaChart,
@@ -101,8 +103,24 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useStudentData } from "@/hooks/useStudentData";
 import { useAuth } from "@/hooks/useAuth";
-import { sendMailViaPhp } from "@/hooks/useApi";
+import { sendMailViaPhp, apiGet } from "@/hooks/useApi";
 import { Loading } from "@/components/Loading";
+import { BulkProgressTable } from "@/components/BulkProgressTable";
+import { StudentHomeworkPanel } from "@/components/StudentHomeworkPanel";
+import { StudentMemorizationGridPanel } from "@/components/StudentMemorizationGridPanel";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type {
   Student,
   School,
@@ -184,13 +202,20 @@ export function ProgressPage() {
   useEffect(() => {
     data.loadStudents();
     data.loadClassRooms();
-    data.loadLessons();
+    data.loadLessons(true);
+    data.loadCourseSchedules();
     data.loadSchools();
     data.loadProgress();
     data.loadAttendance();
     data.loadHomeworkTemplates();
+    data.loadHomeworkAssignments();
+    data.loadMemorizationTexts();
+    data.loadMemorizationTracking();
     data.loadCurriculumTopics();
     refreshTeacherLessons();
+    apiGet<{ value?: string }>("system-settings/sub_topic_required")
+      .then((d) => setSubTopicRequired(String(d.value).toLowerCase() === "true"))
+      .catch(() => setSubTopicRequired(false));
   }, []);
 
   const isTeacher =
@@ -236,22 +261,64 @@ export function ProgressPage() {
         })()
       : data.students;
 
-  const [activeView, setActiveView] = useState<"summary" | "bulk" | "records">(
-    "bulk",
+  const PROGRESS_FILTERS_KEY = "ots_progress_filters";
+  const savedFilters = (() => {
+    try {
+      const raw = localStorage.getItem(PROGRESS_FILTERS_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {
+      /* ignore */
+    }
+    return {};
+  })();
+
+  const [activeView, setActiveView] = useState<
+    "summary" | "bulk" | "records" | "tracking"
+  >(
+    ["summary", "bulk", "records", "tracking"].includes(savedFilters.activeView)
+      ? savedFilters.activeView
+      : "bulk",
   );
   const [summarySearch, setSummarySearch] = useState("");
   const [bulkSearch, setBulkSearch] = useState("");
+  const [recordsSearch, setRecordsSearch] = useState("");
 
   useEffect(() => {
     setSummarySearch("");
     setBulkSearch("");
+    setRecordsSearch("");
+    setTrackingSearch("");
+    if (activeView !== "tracking") {
+      setTrackingStudentId("");
+    }
   }, [activeView]);
 
-  const [selLesson, setSelLesson] = useState("");
-  const [progDate, setProgDate] = useState(
-    new Date().toISOString().split("T")[0],
+  const [selCourse, setSelCourse] = useState<string>(savedFilters.selCourse ?? "");
+  const [selLesson, setSelLesson] = useState<string>(savedFilters.selLesson ?? "");
+  const [trackingCourse, setTrackingCourse] = useState<string>("");
+  const [trackingSearch, setTrackingSearch] = useState<string>("");
+  const [trackingStudentId, setTrackingStudentId] = useState<string>("");
+  const [trackingSubTab, setTrackingSubTab] = useState<"homework" | "memorization">(
+    "homework",
   );
+  const [progDate, setProgDate] = useState<string>(
+    savedFilters.progDate || new Date().toISOString().split("T")[0],
+  );
+
+  // Seans seçildiğinde bağlı kursu da otomatik seç.
+  useEffect(() => {
+    if (!selLesson || selLesson === "all") return;
+    const schedule = data.courseSchedules.find(
+      (cs) => String(cs.id) === selLesson,
+    );
+    if (schedule && String(schedule.courseId) !== selCourse) {
+      setSelCourse(String(schedule.courseId));
+    }
+  }, [selLesson, data.courseSchedules]);
   const [saved, setSaved] = useState(false);
+  const [openProfileInNewTab, setOpenProfileInNewTab] = useState(
+    () => localStorage.getItem("progress_open_profile_new_tab") === "true",
+  );
 
   // Toplu giriş state'i: ogrenciId -> { kuranPages, kuranCurrent, risalePages, ... }
   const [bulkData, setBulkData] = useState<
@@ -269,12 +336,54 @@ export function ProgressPage() {
   >({});
 
   // Filtre state'leri
-  const [summaryFilterGroup, setSummaryFilterGroup] = useState<string>("all");
-  const [filterGroup, setFilterGroup] = useState<string>("all");
-  const [filterSchool, setFilterSchool] = useState<string>("all");
-  const [filterGrade, setFilterGrade] = useState<string>("all");
-  const [filterAgeMin, setFilterAgeMin] = useState<string>("");
-  const [filterAgeMax, setFilterAgeMax] = useState<string>("");
+  const [summaryFilterGroup, setSummaryFilterGroup] = useState<string>(
+    savedFilters.summaryFilterGroup ?? "all",
+  );
+  const [filterGroup, setFilterGroup] = useState<string>(
+    savedFilters.filterGroup ?? "all",
+  );
+  const [filterSchool, setFilterSchool] = useState<string>(
+    savedFilters.filterSchool ?? "all",
+  );
+  const [filterGrade, setFilterGrade] = useState<string>(
+    savedFilters.filterGrade ?? "all",
+  );
+  const [filterAgeMin, setFilterAgeMin] = useState<string>(
+    savedFilters.filterAgeMin ?? "",
+  );
+  const [filterAgeMax, setFilterAgeMax] = useState<string>(
+    savedFilters.filterAgeMax ?? "",
+  );
+
+  // Persist filter selections so they survive navigation to/from student profile.
+  useEffect(() => {
+    localStorage.setItem(
+      PROGRESS_FILTERS_KEY,
+      JSON.stringify({
+        activeView,
+        summaryFilterGroup,
+        filterGroup,
+        filterSchool,
+        filterGrade,
+        filterAgeMin,
+        filterAgeMax,
+        selCourse,
+        selLesson,
+        progDate,
+      }),
+    );
+  }, [
+    activeView,
+    summaryFilterGroup,
+    filterGroup,
+    filterSchool,
+    filterGrade,
+    filterAgeMin,
+    filterAgeMax,
+    selCourse,
+    selLesson,
+    progDate,
+  ]);
 
   // Coklu ogrenci secimi + toplu odev (homework template tabanli)
   const [selectedStudents, setSelectedStudents] = useState<number[]>([]);
@@ -296,7 +405,10 @@ export function ProgressPage() {
     useState<string>("");
   const [selectedLessonSubTopic, setSelectedLessonSubTopic] =
     useState<string>("");
+  const [selectedLessonOtherText, setSelectedLessonOtherText] =
+    useState<string>("");
   const [lessonLogNotes, setLessonLogNotes] = useState("");
+  const [subTopicRequired, setSubTopicRequired] = useState(false);
   const selectedTopic = data.curriculumTopics.find(
     (t) => String(t.id) === selectedLessonTopicId,
   );
@@ -309,8 +421,13 @@ export function ProgressPage() {
     return l[l.length - 1];
   };
 
+  const selectedCourseId =
+    selCourse && selCourse !== "all" ? Number(selCourse) : null;
   const selectedLessonId =
     selLesson && selLesson !== "all" ? Number(selLesson) : null;
+  const selectedScheduleCourseId = selectedLessonId
+    ? data.courseSchedules.find((cs) => cs.id === selectedLessonId)?.courseId
+    : null;
   const summaryStudents = myStudents
     .filter((s) => {
       if (summaryFilterGroup === "all") return true;
@@ -349,7 +466,12 @@ export function ProgressPage() {
 
   const studentsToShow = myStudents
     .filter((s) => {
-      if (selectedLessonId && !s.lessons.includes(selectedLessonId))
+      if (selectedCourseId && !s.lessons.includes(selectedCourseId))
+        return false;
+      if (
+        selectedScheduleCourseId &&
+        !s.lessons.includes(selectedScheduleCourseId)
+      )
         return false;
       if (filterGroup !== "all") {
         const group = data.classRooms.find((c) => String(c.id) === filterGroup);
@@ -381,6 +503,45 @@ export function ProgressPage() {
       ),
     );
 
+  const lastProgressForBulk = useMemo(() => {
+    const map: Record<number, Progress> = {};
+    studentsToShow.forEach((s) => {
+      const p = lastProg(s.id);
+      if (p) map[s.id] = p;
+    });
+    return map;
+  }, [studentsToShow, data.progress]);
+
+  const filteredRecords = useMemo(() => {
+    const term = recordsSearch.toLowerCase().trim();
+    if (!term) return data.progress;
+    return data.progress.filter((p) => {
+      const s = data.students.find((x) => x.id === p.studentId);
+      const name = `${s?.firstName ?? ""} ${s?.lastName ?? ""}`.toLowerCase();
+      return name.includes(term);
+    });
+  }, [data.progress, data.students, recordsSearch]);
+
+  const trackingStudents = useMemo(() => {
+    let list = myStudents;
+    if (trackingCourse && trackingCourse !== "all") {
+      const courseId = Number(trackingCourse);
+      list = list.filter((s) => s.lessons.includes(courseId));
+    }
+    const term = trackingSearch.trim().toLowerCase();
+    if (term) {
+      list = list.filter((s) =>
+        `${s.firstName} ${s.lastName}`.toLowerCase().includes(term),
+      );
+    }
+    return list.sort((a, b) =>
+      `${a.firstName} ${a.lastName}`.localeCompare(
+        `${b.firstName} ${b.lastName}`,
+        "tr",
+      ),
+    );
+  }, [myStudents, trackingCourse, trackingSearch]);
+
   // Filtre secenekleri
   const gradeOptions = useMemo(
     () => Array.from(new Set(data.students.map((s) => s.grade))).sort(),
@@ -392,6 +553,7 @@ export function ProgressPage() {
     filterGrade !== "all",
     filterAgeMin,
     filterAgeMax,
+    selCourse,
     selLesson,
   ].filter(Boolean).length;
 
@@ -462,33 +624,51 @@ export function ProgressPage() {
   const handleSaveLessonLog = () => {
     if (selectedStudents.length === 0) return;
     if (!selectedLessonCategory) {
-      alert("Lütfen bir kategori seçin (İlmihal / Adab / Tecvid)");
+      alert("Lütfen bir kategori seçin (İlmihal / Adab / Tecvid / Diğer)");
       return;
     }
-    if (!selectedLessonTopicId) {
-      alert("Lütfen bir konu seçin");
-      return;
-    }
-    if (!selectedLessonSubTopic) {
-      alert("Lütfen bir alt konu seçin");
-      return;
+    if (selectedLessonCategory === "diger") {
+      if (!selectedLessonOtherText.trim()) {
+        alert("Lütfen açıklama girin");
+        return;
+      }
+    } else {
+      if (!selectedLessonTopicId) {
+        alert("Lütfen bir konu seçin");
+        return;
+      }
+      if (subTopicRequired && !selectedLessonSubTopic) {
+        alert("Lütfen bir alt konu seçin");
+        return;
+      }
     }
     const topic = data.curriculumTopics.find(
       (t) => String(t.id) === selectedLessonTopicId,
     );
-    if (
-      !confirm(
-        `${selectedStudents.length} öğrenciye "${topic?.title} → ${selectedLessonSubTopic}" ders işlemesi kaydedilecek. Emin misiniz?`,
-      )
-    )
-      return;
+    const subTopicLabel = selectedLessonSubTopic
+      ? ` → ${selectedLessonSubTopic}`
+      : "";
+    const topicTitle =
+      selectedLessonCategory === "diger"
+        ? selectedLessonOtherText.trim()
+        : topic?.title || "";
+    const confirmMessage =
+      selectedLessonCategory === "diger"
+        ? `${selectedStudents.length} öğrenciye "Diğer: ${topicTitle}" ders işlemesi kaydedilecek. Emin misiniz?`
+        : `${selectedStudents.length} öğrenciye "${topicTitle}${subTopicLabel}" ders işlemesi kaydedilecek. Emin misiniz?`;
+    if (!confirm(confirmMessage)) return;
     selectedStudents.forEach((sid) => {
       data.addLessonLog({
         studentId: sid,
         date: progDate,
-        category: selectedLessonCategory as "ilmihal" | "adab" | "tecvid",
-        topic: topic?.title || "",
-        subTopic: selectedLessonSubTopic,
+        category: selectedLessonCategory as
+          | "ilmihal"
+          | "adab"
+          | "tecvid"
+          | "diger",
+        topic: topicTitle,
+        subTopic:
+          selectedLessonCategory === "diger" ? "" : selectedLessonSubTopic,
         notes: lessonLogNotes,
         author: currentUser?.fullName || currentUser?.username || "Öğretmen",
       });
@@ -497,6 +677,7 @@ export function ProgressPage() {
     setSelectedLessonCategory("");
     setSelectedLessonTopicId("");
     setSelectedLessonSubTopic("");
+    setSelectedLessonOtherText("");
     setLessonLogNotes("");
     setSelectedStudents([]);
     alert(`${selectedStudents.length} öğrenciye ders işlemesi kaydedildi`);
@@ -510,16 +691,36 @@ export function ProgressPage() {
     let count = 0;
     studentsToShow.forEach((s) => {
       const d = bulkData[s.id];
-      if (d && (d.kp || d.kc || d.rp || d.rc || d.ec)) {
+      const lp = lastProg(s.id);
+      const hasChange =
+        d &&
+        (d.kp !== undefined ||
+          d.kc !== undefined ||
+          d.rp !== undefined ||
+          d.rc !== undefined ||
+          d.ec !== undefined ||
+          d.note !== undefined);
+      if (hasChange) {
         data.addProgress({
           studentId: s.id,
           date: progDate,
-          kuranPages: Number(d.kp) || 0,
-          kuranCurrentPage: Number(d.kc) || 0,
-          risalePages: Number(d.rp) || 0,
-          risaleCurrentPage: Number(d.rc) || 0,
-          elifbaCurrentPage: Number(d.ec) || 0,
-          notes: d.note || "",
+          kuranPages:
+            d?.kp !== undefined ? Number(d.kp) || 0 : lp?.kuranPages || 0,
+          kuranCurrentPage:
+            d?.kc !== undefined
+              ? Number(d.kc) || 0
+              : lp?.kuranCurrentPage || 0,
+          risalePages:
+            d?.rp !== undefined ? Number(d.rp) || 0 : lp?.risalePages || 0,
+          risaleCurrentPage:
+            d?.rc !== undefined
+              ? Number(d.rc) || 0
+              : lp?.risaleCurrentPage || 0,
+          elifbaCurrentPage:
+            d?.ec !== undefined
+              ? Number(d.ec) || 0
+              : lp?.elifbaCurrentPage || 0,
+          notes: d?.note !== undefined ? d.note : lp?.notes || "",
         });
         count++;
       }
@@ -580,9 +781,15 @@ export function ProgressPage() {
   };
 
   const goStudentPage = (studentId: number) => {
-    navigate(
-      canEdit ? `/student-form/${studentId}` : `/student-profile/${studentId}`,
-    );
+    if (openProfileInNewTab) {
+      window.open(
+        `/#/student-profile/${studentId}`,
+        "_blank",
+        "noopener,noreferrer",
+      );
+    } else {
+      navigate(`/student-profile/${studentId}`);
+    }
   };
   /*
   if (
@@ -624,6 +831,14 @@ export function ProgressPage() {
           >
             <FileText size={16} className="mr-1" />
             Kayıtlar
+          </Button>
+          <Button
+            size="sm"
+            variant={activeView === "tracking" ? "default" : "outline"}
+            onClick={() => setActiveView("tracking")}
+          >
+            <ListChecks size={16} className="mr-1" />
+            Ödev / Ezber Takip
           </Button>
         </div>
       </div>
@@ -679,6 +894,25 @@ export function ProgressPage() {
                       className="pl-10"
                     />
                   </div>
+                </div>
+                <div className="flex items-center gap-2 sm:ml-auto">
+                  <Switch
+                    id="open-profile-new-tab"
+                    checked={openProfileInNewTab}
+                    onCheckedChange={(checked) => {
+                      setOpenProfileInNewTab(checked);
+                      localStorage.setItem(
+                        "progress_open_profile_new_tab",
+                        String(checked),
+                      );
+                    }}
+                  />
+                  <Label
+                    htmlFor="open-profile-new-tab"
+                    className="text-xs cursor-pointer"
+                  >
+                    Profili yeni sekmede aç
+                  </Label>
                 </div>
               </div>
             </CardContent>
@@ -867,7 +1101,21 @@ export function ProgressPage() {
                         onClick={() => goStudentPage(s.id)}
                       >
                         <TableCell className="font-medium text-sm">
-                          {s.firstName} {s.lastName}
+                          <Link
+                            to={`/student-profile/${s.id}`}
+                            target={
+                              openProfileInNewTab ? "_blank" : undefined
+                            }
+                            rel={
+                              openProfileInNewTab
+                                ? "noopener noreferrer"
+                                : undefined
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            className="hover:underline"
+                          >
+                            {s.firstName} {s.lastName}
+                          </Link>
                         </TableCell>
                         <TableCell className="text-xs">{s.grade}</TableCell>
                         <TableCell className="text-center">
@@ -1018,6 +1266,7 @@ export function ProgressPage() {
                       setFilterGrade("all");
                       setFilterAgeMin("");
                       setFilterAgeMax("");
+                      setSelCourse("");
                       setSelLesson("");
                     }}
                   >
@@ -1064,7 +1313,31 @@ export function ProgressPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-1 w-full sm:w-56">
+                <div className="space-y-1 w-full sm:w-48">
+                  <Label className="text-xs">Kurslar</Label>
+                  <Select
+                    value={selCourse || "all"}
+                    onValueChange={(v) => {
+                      setSelCourse(v === "all" ? "" : v);
+                      setSelLesson("");
+                      setSaved(false);
+                      setSelectedStudents([]);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Tüm kurslar" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tüm Kurslar</SelectItem>
+                      {data.lessons.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1 w-full sm:w-64">
                   <Label className="text-xs">Ders / Seans</Label>
                   <Select
                     value={selLesson || "all"}
@@ -1075,15 +1348,26 @@ export function ProgressPage() {
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Tüm dersler" />
+                      <SelectValue placeholder="Tüm seanslar" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">Tüm Dersler</SelectItem>
-                      {data.lessons.map((l) => (
-                        <SelectItem key={l.id} value={String(l.id)}>
-                          {l.name}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="all">Tüm Seanslar</SelectItem>
+                      {data.courseSchedules
+                        .filter(
+                          (cs) =>
+                            !selCourse || String(cs.courseId) === selCourse,
+                        )
+                        .map((cs) => {
+                          const course = data.lessons.find(
+                            (c) => c.id === cs.courseId,
+                          );
+                          const label = `${course?.name || "Kurs"} - ${cs.dayOfWeek || "?"} ${cs.startTime || ""}-${cs.endTime || ""}`;
+                          return (
+                            <SelectItem key={cs.id} value={String(cs.id)}>
+                              {label}
+                            </SelectItem>
+                          );
+                        })}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1222,14 +1506,6 @@ export function ProgressPage() {
                     </Button>
                   </>
                 )}
-                {saved && (
-                  <Badge
-                    variant="outline"
-                    className="text-green-600 border-green-300"
-                  >
-                    <CheckCircle2 size={14} className="mr-1" /> Kaydedildi
-                  </Badge>
-                )}
               </div>
 
               <Card>
@@ -1241,128 +1517,17 @@ export function ProgressPage() {
                       : ""}
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="p-0 overflow-x-auto overflow-y-auto max-h-[70vh]">
-                  <Table className="min-w-[900px]">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="text-xs w-8">✓</TableHead>
-                        <TableHead className="text-xs">Öğrenci</TableHead>
-                        <TableHead className="text-xs text-center w-24">
-                          K.Ok
-                        </TableHead>
-                        <TableHead className="text-xs text-center w-24">
-                          K.Son
-                        </TableHead>
-                        <TableHead className="text-xs text-center w-24">
-                          R.Ok
-                        </TableHead>
-                        <TableHead className="text-xs text-center w-24">
-                          R.Son
-                        </TableHead>
-                        <TableHead className="text-xs text-center w-24">
-                          Elif.Son
-                        </TableHead>
-                        <TableHead className="text-xs">Not</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {studentsToShow.map((s) => (
-                        <TableRow
-                          key={s.id}
-                          className={`hover:bg-blue-50 transition-colors ${selectedStudents.includes(s.id) ? "bg-purple-50" : ""}`}
-                        >
-                          <TableCell onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              checked={selectedStudents.includes(s.id)}
-                              onChange={() => toggleStudentSelection(s.id)}
-                              className="w-4 h-4 accent-emerald-600 cursor-pointer"
-                            />
-                          </TableCell>
-                          <TableCell
-                            className="font-medium text-sm whitespace-nowrap cursor-pointer"
-                            onClick={() => navigate(`/student-profile/${s.id}`)}
-                          >
-                            {s.firstName} {s.lastName}
-                            <p className="text-[10px] text-gray-400">
-                              {s.grade}
-                            </p>
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              size={1}
-                              className="h-8 text-xs w-full min-w-16"
-                              value={bulkData[s.id]?.kp || ""}
-                              onChange={(e) =>
-                                updateBulk(s.id, "kp", e.target.value)
-                              }
-                              placeholder="0"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              size={1}
-                              className="h-8 text-xs w-full min-w-16"
-                              value={bulkData[s.id]?.kc || ""}
-                              onChange={(e) =>
-                                updateBulk(s.id, "kc", e.target.value)
-                              }
-                              placeholder="0"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              size={1}
-                              className="h-8 text-xs w-full min-w-16"
-                              value={bulkData[s.id]?.rp || ""}
-                              onChange={(e) =>
-                                updateBulk(s.id, "rp", e.target.value)
-                              }
-                              placeholder="0"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              size={1}
-                              className="h-8 text-xs w-full min-w-16"
-                              value={bulkData[s.id]?.rc || ""}
-                              onChange={(e) =>
-                                updateBulk(s.id, "rc", e.target.value)
-                              }
-                              placeholder="0"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              size={1}
-                              className="h-8 text-xs w-full min-w-16"
-                              value={bulkData[s.id]?.ec || ""}
-                              onChange={(e) =>
-                                updateBulk(s.id, "ec", e.target.value)
-                              }
-                              placeholder="0"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="text"
-                              className="h-8 text-xs w-full min-w-40"
-                              value={bulkData[s.id]?.note || ""}
-                              onChange={(e) =>
-                                updateBulk(s.id, "note", e.target.value)
-                              }
-                              placeholder="Not..."
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                <CardContent className="p-0 sm:p-4">
+                  <BulkProgressTable
+                    students={studentsToShow}
+                    bulkData={bulkData}
+                    lastProgress={lastProgressForBulk}
+                    selectedStudents={selectedStudents}
+                    onToggleSelect={toggleStudentSelection}
+                    onUpdate={updateBulk}
+                    onNavigate={(sid) => navigate(`/student-profile/${sid}`)}
+                    saved={saved}
+                  />
                 </CardContent>
               </Card>
               <Button onClick={handleSaveBulk} className="w-full" size="lg">
@@ -1524,8 +1689,10 @@ export function ProgressPage() {
                     {/* Kategori */}
                     <div className="space-y-1">
                       <Label className="text-xs">Kategori *</Label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {(["ilmihal", "adab", "tecvid"] as const).map((cat) => (
+                      <div className="grid grid-cols-4 gap-2">
+                        {(
+                          ["ilmihal", "adab", "tecvid", "diger"] as const
+                        ).map((cat) => (
                           <button
                             key={cat}
                             type="button"
@@ -1533,6 +1700,7 @@ export function ProgressPage() {
                               setSelectedLessonCategory(cat);
                               setSelectedLessonTopicId("");
                               setSelectedLessonSubTopic("");
+                              setSelectedLessonOtherText("");
                             }}
                             className={`p-3 rounded-lg border text-center transition-colors ${selectedLessonCategory === cat ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:bg-gray-50"}`}
                           >
@@ -1540,41 +1708,56 @@ export function ProgressPage() {
                               size={18}
                               className={`mx-auto mb-1 ${selectedLessonCategory === cat ? "text-emerald-600" : "text-gray-400"}`}
                             />
-                            <span className="text-xs font-medium">{cat}</span>
+                            <span className="text-xs font-medium">
+                              {cat === "diger" ? "Diğer" : cat}
+                            </span>
                           </button>
                         ))}
                       </div>
                     </div>
                     {/* Konu */}
-                    {selectedLessonCategory && (
-                      <div className="space-y-1">
-                        <Label className="text-xs">Konu *</Label>
-                        <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
-                          {filteredTopics.map((t) => (
-                            <button
-                              key={t.id}
-                              type="button"
-                              onClick={() => {
-                                setSelectedLessonTopicId(String(t.id));
-                                setSelectedLessonSubTopic("");
-                              }}
-                              className={`text-left p-3 rounded-lg border transition-colors ${selectedLessonTopicId === String(t.id) ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:bg-gray-50"}`}
-                            >
-                              <span className="font-medium text-sm">
-                                {t.title}
-                              </span>
-                              <p className="text-[10px] text-gray-400">
-                                {t.subTopics.length} alt konu
-                              </p>
-                            </button>
-                          ))}
+                    {selectedLessonCategory &&
+                      selectedLessonCategory !== "diger" && (
+                        <div className="space-y-1">
+                          <Label className="text-xs">Konu *</Label>
+                          <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
+                            {filteredTopics.map((t) => (
+                              <button
+                                key={t.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedLessonTopicId(String(t.id));
+                                  setSelectedLessonSubTopic("");
+                                }}
+                                className={`text-left p-3 rounded-lg border transition-colors ${selectedLessonTopicId === String(t.id) ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:bg-gray-50"}`}
+                              >
+                                <span className="font-medium text-sm">
+                                  {t.title}
+                                </span>
+                                <p className="text-[10px] text-gray-400">
+                                  {t.subTopics.length} alt konu
+                                </p>
+                              </button>
+                            ))}
+                          </div>
                         </div>
+                      )}
+                    {selectedLessonCategory === "diger" && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Açıklama *</Label>
+                        <Input
+                          value={selectedLessonOtherText}
+                          onChange={(e) =>
+                            setSelectedLessonOtherText(e.target.value)
+                          }
+                          placeholder="Örn. Kelime Çalışması, Vecize, Rüku Eğitimi..."
+                        />
                       </div>
                     )}
                     {/* Alt Konu */}
-                    {selectedTopic && (
+                    {selectedTopic && selectedLessonCategory !== "diger" && (
                       <div className="space-y-1">
-                        <Label className="text-xs">Alt Konu *</Label>
+                        <Label className="text-xs">Alt Konu {subTopicRequired ? "*" : "(opsiyonel)"}</Label>
                         <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
                           {selectedTopic.subTopics.map((st: string) => (
                             <button
@@ -1601,16 +1784,21 @@ export function ProgressPage() {
                     </div>
                     {/* Özet */}
                     {selectedLessonCategory &&
-                      selectedLessonTopicId &&
-                      selectedLessonSubTopic && (
+                      (selectedLessonCategory === "diger"
+                        ? selectedLessonOtherText.trim()
+                        : selectedLessonTopicId) && (
                         <div className="p-3 bg-emerald-50 rounded-lg">
                           <p className="text-xs text-emerald-700 font-medium">
                             {selectedLessonCategory === "ilmihal"
                               ? "İlmihal"
                               : selectedLessonCategory === "adab"
                                 ? "Adab"
-                                : "Tecvid"}{" "}
-                            → {selectedTopic?.title} → {selectedLessonSubTopic}
+                                : selectedLessonCategory === "tecvid"
+                                  ? "Tecvid"
+                                  : "Diğer"}{" "}
+                            {selectedLessonCategory !== "diger"
+                              ? `→ ${selectedTopic?.title}${selectedLessonSubTopic ? ` → ${selectedLessonSubTopic}` : ""}`
+                              : `: ${selectedLessonOtherText.trim()}`}
                           </p>
                         </div>
                       )}
@@ -1625,6 +1813,7 @@ export function ProgressPage() {
                           setSelectedLessonCategory("");
                           setSelectedLessonTopicId("");
                           setSelectedLessonSubTopic("");
+                          setSelectedLessonOtherText("");
                           setLessonLogNotes("");
                         }}
                       >
@@ -1649,7 +1838,21 @@ export function ProgressPage() {
       {activeView === "records" && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Tüm Gelişim Kayıtları</CardTitle>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <CardTitle className="text-base">Tüm Gelişim Kayıtları</CardTitle>
+              <div className="relative w-full sm:w-64">
+                <Search
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                  size={18}
+                />
+                <Input
+                  placeholder="Öğrenci ara..."
+                  value={recordsSearch}
+                  onChange={(e) => setRecordsSearch(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="p-0 overflow-x-auto">
             <Table>
@@ -1679,7 +1882,7 @@ export function ProgressPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.progress.map((p) => {
+                {filteredRecords.map((p) => {
                   const s = data.students.find((x) => x.id === p.studentId);
                   return (
                     <TableRow key={p.id}>
@@ -1744,13 +1947,13 @@ export function ProgressPage() {
                     </TableRow>
                   );
                 })}
-                {data.progress.length === 0 && (
+                {filteredRecords.length === 0 && (
                   <TableRow>
                     <TableCell
                       colSpan={7}
                       className="text-center py-8 text-gray-500"
                     >
-                      Kayıt yok
+                      {recordsSearch ? "Eşleşen kayıt bulunamadı" : "Kayıt yok"}
                     </TableCell>
                   </TableRow>
                 )}
@@ -1758,6 +1961,127 @@ export function ProgressPage() {
             </Table>
           </CardContent>
         </Card>
+      )}
+
+      {/* --- ÖDEV / EZBER TAKIP (Öğrenci bazlı) --- */}
+      {activeView === "tracking" && (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">
+                Kurs ve Öğrenci Seçimi
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Kurs</Label>
+                <Select
+                  value={trackingCourse}
+                  onValueChange={(v) => {
+                    setTrackingCourse(v);
+                    setTrackingStudentId("");
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Kurs seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tüm Kurslar</SelectItem>
+                    {data.lessons.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Öğrenci Ara</Label>
+                <Input
+                  placeholder="İsim ara..."
+                  value={trackingSearch}
+                  onChange={(e) => setTrackingSearch(e.target.value)}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {trackingStudents.map((s) => (
+                  <Card
+                    key={s.id}
+                    className={`cursor-pointer transition-colors ${
+                      String(s.id) === trackingStudentId
+                        ? "border-emerald-500 bg-emerald-50"
+                        : "hover:bg-gray-50"
+                    }`}
+                    onClick={() => setTrackingStudentId(String(s.id))}
+                  >
+                    <CardContent className="p-3">
+                      <p className="font-medium text-sm">
+                        {s.firstName} {s.lastName}
+                      </p>
+                      <p className="text-xs text-gray-500">{s.grade}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+                {trackingStudents.length === 0 && (
+                  <p className="text-sm text-gray-500 col-span-full">
+                    Eşleşen öğrenci bulunamadı.
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {trackingStudentId && (
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant={
+                      trackingSubTab === "homework" ? "default" : "outline"
+                    }
+                    onClick={() => setTrackingSubTab("homework")}
+                  >
+                    <BookOpen size={16} className="mr-1" />
+                    Ödev Takip
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={
+                      trackingSubTab === "memorization" ? "default" : "outline"
+                    }
+                    onClick={() => setTrackingSubTab("memorization")}
+                  >
+                    <ListChecks size={16} className="mr-1" />
+                    Ezber Takip
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {trackingSubTab === "homework" && (
+                  <StudentHomeworkPanel
+                    studentId={Number(trackingStudentId)}
+                  />
+                )}
+                {trackingSubTab === "memorization" && (
+                  <StudentMemorizationGridPanel
+                    studentId={Number(trackingStudentId)}
+                  />
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {!trackingStudentId && (
+            <Card>
+              <CardContent className="p-8 text-center text-gray-500">
+                Ödev veya ezber takibi yapmak için bir öğrenci seçin.
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
     </div>
   );

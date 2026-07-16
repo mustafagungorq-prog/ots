@@ -200,6 +200,7 @@ export function ClassesPage() {
     data.loadClassRooms();
     data.loadSchools();
     data.loadLessons();
+    data.loadCourseSchedules();
     data.loadStudents();
     refreshUsers();
   }, []);
@@ -357,7 +358,7 @@ export function ClassesPage() {
                     {roomLessons.length > 0 ? (
                       roomLessons.map((lesson) => {
                         const lessonStudents = roomStudents.filter((s) =>
-                          s.lessons.includes(lesson.id),
+                          s.lessons.includes(lesson.courseId),
                         );
                         const isLessonExpanded =
                           expandedClassLesson?.roomId === room.id &&
@@ -438,7 +439,7 @@ export function ClassesPage() {
                                             )
                                               data.updateStudent(s.id, {
                                                 lessons: s.lessons.filter(
-                                                  (lid) => lid !== lesson.id,
+                                                  (lid) => lid !== lesson.courseId,
                                                 ),
                                               });
                                           }}
@@ -457,7 +458,7 @@ export function ClassesPage() {
                                 {/* Derse Öğrenci Ekle */}
                                 {(() => {
                                   const unassigned = roomStudents.filter(
-                                    (s) => !s.lessons.includes(lesson.id),
+                                    (s) => !s.lessons.includes(lesson.courseId),
                                   );
                                   const isAddOpen =
                                     lessonAddOpen?.roomId === room.id &&
@@ -550,7 +551,7 @@ export function ClassesPage() {
                                                       data.updateStudent(sid, {
                                                         lessons: [
                                                           ...st.lessons,
-                                                          lesson.id,
+                                                          lesson.courseId,
                                                         ],
                                                       });
                                                   },

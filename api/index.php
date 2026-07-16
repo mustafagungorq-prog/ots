@@ -14,6 +14,20 @@ if (!function_exists('logApiError')) {
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/auth.php';
 
+function columnExists($table, $column) {
+    static $cache = [];
+    $key = "$table.$column";
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    try {
+        $stmt = getDb()->prepare("SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?");
+        $stmt->execute([$table, $column]);
+        $cache[$key] = (bool)$stmt->fetch();
+    } catch (PDOException $e) {
+        $cache[$key] = false;
+    }
+    return $cache[$key];
+}
+
 $method = $_SERVER['REQUEST_METHOD'];
 $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $path = '';
@@ -32,6 +46,11 @@ $parts = explode('/', $path);
 $resource = $parts[0] ?? '';
 $id = isset($parts[1]) && is_numeric($parts[1]) ? (int)$parts[1] : null;
 $body = json_decode(file_get_contents('php://input'), true) ?: [];
+
+// Allow non-numeric sub-routes (e.g. memorization-tracking/summary).
+if ($resource === 'memorization-tracking' && isset($parts[1]) && $parts[1] === 'summary') {
+    $id = 'summary';
+}
 
 $debugMode = (env('APP_DEBUG') ?: 'false') === 'true';
 
@@ -107,11 +126,87 @@ function ensureParentStudentLinksTable() {
             student_id INT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_parent_student (parent_user_id, student_id),
+            UNIQUE KEY uniq_student (student_id),
             INDEX idx_parent_user_id (parent_user_id),
             INDEX idx_student_id (student_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     } catch (PDOException $e) {
         // Keep runtime resilient even if CREATE privilege is not granted.
+    }
+}
+
+function getSystemSetting($key, $default = null) {
+    static $cache = [];
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    try {
+        $stmt = getDb()->prepare("SELECT `value` FROM system_settings WHERE `key` = ?");
+        $stmt->execute([$key]);
+        $row = $stmt->fetch();
+        $cache[$key] = $row ? $row['value'] : $default;
+    } catch (PDOException $e) {
+        $cache[$key] = $default;
+    }
+    return $cache[$key];
+}
+
+function setSystemSetting($key, $value) {
+    static $cache = [];
+    $stmt = getDb()->prepare("INSERT INTO system_settings (`key`, `value`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)");
+    $stmt->execute([$key, $value]);
+    $cache[$key] = $value;
+}
+
+function validateUserPayload($body, $isUpdate = false) {
+    $username = isset($body['username']) ? trim((string)$body['username']) : '';
+    $fullName = isset($body['fullName']) ? trim((string)$body['fullName']) : '';
+    $email = isset($body['email']) ? trim((string)$body['email']) : '';
+    $phone = isset($body['phone']) ? trim((string)$body['phone']) : '';
+    $role = isset($body['role']) ? trim((string)$body['role']) : '';
+    $password = isset($body['password']) ? (string)$body['password'] : '';
+    $active = isset($body['active']) ? (bool)$body['active'] : true;
+
+    $validRoles = ['superadmin', 'admin', 'authorized_teacher', 'teacher', 'parent'];
+
+    if (!$isUpdate) {
+        if ($username === '') error('Username is required', 400);
+        if ($fullName === '') error('Full name is required', 400);
+        if ($role === '') error('Role is required', 400);
+        if ($password === '') error('Password is required', 400);
+        if (strlen($password) < 6) error('Password must be at least 6 characters', 400);
+    }
+
+    if ($username !== '' && strlen($username) < 3) error('Username must be at least 3 characters', 400);
+    if ($username !== '' && !preg_match('/^[a-zA-Z0-9_]+$/', $username)) error('Username can only contain letters, numbers and underscores', 400);
+    if ($fullName !== '' && strlen($fullName) < 2) error('Full name must be at least 2 characters', 400);
+    if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) error('Invalid email format', 400);
+    if ($role !== '' && !in_array($role, $validRoles, true)) error('Invalid role', 400);
+
+    return [
+        'username' => $username,
+        'fullName' => $fullName,
+        'email' => $email,
+        'phone' => $phone,
+        'role' => $role,
+        'password' => $password,
+        'active' => $active,
+    ];
+}
+
+function ensureUserUnique($field, $value, $excludeId = null) {
+    $allowed = ['username' => true, 'email' => true];
+    if (!isset($allowed[$field])) return;
+    if ($value === '') return;
+    $db = getDb();
+    $sql = "SELECT id FROM users WHERE {$field} = ?";
+    $params = [$value];
+    if ($excludeId) {
+        $sql .= " AND id != ?";
+        $params[] = (int)$excludeId;
+    }
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    if ($stmt->fetch()) {
+        error(ucfirst($field) . ' already exists', 409);
     }
 }
 
@@ -181,59 +276,38 @@ if ($resource === 'users') {
     requireRole(['superadmin', 'admin']);
 
     if ($method === 'POST' && !$id) {
-        $username = trim((string)($body['username'] ?? ''));
-        $fullName = trim((string)($body['fullName'] ?? ''));
-        if ($username === '' || $fullName === '') error('username and fullName are required', 400);
+        $v = validateUserPayload($body);
+        ensureUserUnique('username', $v['username']);
+        ensureUserUnique('email', $v['email']);
 
-        $hash = password_hash($body['password'] ?? '123456', PASSWORD_BCRYPT);
-
-        try {
-            $stmt = getDb()->prepare("INSERT INTO users (username, password, full_name, email, phone, role) VALUES (?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$username, $hash, $fullName, $body['email'] ?? null, $body['phone'] ?? null, $body['role'] ?? 'teacher']);
-            json(['id' => (int)getDb()->lastInsertId()]);
-        } catch (PDOException $e) {
-            // Fallback for legacy schemas with fewer columns.
-            try {
-                $colStmt = getDb()->query("SHOW COLUMNS FROM users");
-                $columns = [];
-                foreach ($colStmt->fetchAll() as $c) {
-                    $columns[$c['Field']] = true;
-                }
-
-                $insertCols = [];
-                $insertVals = [];
-
-                if (isset($columns['username'])) { $insertCols[] = 'username'; $insertVals[] = $username; }
-                if (isset($columns['password'])) { $insertCols[] = 'password'; $insertVals[] = $hash; }
-                if (isset($columns['full_name'])) { $insertCols[] = 'full_name'; $insertVals[] = $fullName; }
-                if (isset($columns['email'])) { $insertCols[] = 'email'; $insertVals[] = $body['email'] ?? null; }
-                if (isset($columns['phone'])) { $insertCols[] = 'phone'; $insertVals[] = $body['phone'] ?? null; }
-                if (isset($columns['role'])) { $insertCols[] = 'role'; $insertVals[] = $body['role'] ?? 'teacher'; }
-                if (isset($columns['active'])) { $insertCols[] = 'active'; $insertVals[] = 1; }
-
-                if (count($insertCols) < 3) error('Users table is missing required columns', 500);
-
-                $placeholders = implode(', ', array_fill(0, count($insertCols), '?'));
-                $sql = "INSERT INTO users (" . implode(', ', $insertCols) . ") VALUES (" . $placeholders . ")";
-                $stmt = getDb()->prepare($sql);
-                $stmt->execute($insertVals);
-                json(['id' => (int)getDb()->lastInsertId()]);
-            } catch (PDOException $fallbackError) {
-                if ($fallbackError->getCode() === '23000') {
-                    error('Username already exists', 409);
-                }
-                error('Failed to create user: ' . $fallbackError->getMessage(), 400);
-            }
-        }
+        $hash = password_hash($v['password'], PASSWORD_BCRYPT);
+        $stmt = getDb()->prepare("INSERT INTO users (username, password, full_name, email, phone, role, active) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $v['username'],
+            $hash,
+            $v['fullName'],
+            $v['email'] !== '' ? $v['email'] : null,
+            $v['phone'] !== '' ? $v['phone'] : null,
+            $v['role'] !== '' ? $v['role'] : 'teacher',
+            $v['active'] ? 1 : 0,
+        ]);
+        json(['id' => (int)getDb()->lastInsertId()]);
     }
     if ($method === 'PUT' && $id) {
+        $v = validateUserPayload($body, true);
+        ensureUserUnique('username', $v['username'], $id);
+        ensureUserUnique('email', $v['email'], $id);
+
         $fields = []; $vals = [];
         foreach (['full_name', 'email', 'phone', 'role', 'active'] as $f) {
             $key = $f === 'full_name' ? 'fullName' : ($f === 'active' ? 'active' : $f);
             if (isset($body[$key])) { $fields[] = "$f = ?"; $vals[] = $body[$key]; }
         }
-        if (isset($body['password']) && $body['password']) {
-            $fields[] = "password = ?"; $vals[] = password_hash($body['password'], PASSWORD_BCRYPT);
+        if ($v['username'] !== '') {
+            $fields[] = "username = ?"; $vals[] = $v['username'];
+        }
+        if ($v['password'] !== '') {
+            $fields[] = "password = ?"; $vals[] = password_hash($v['password'], PASSWORD_BCRYPT);
         }
         if (empty($fields)) error('No fields to update');
         $vals[] = $id;
@@ -276,6 +350,13 @@ if ($resource === 'parent-student-links') {
         $studentId = isset($body['studentId']) && is_numeric($body['studentId']) ? (int)$body['studentId'] : 0;
         if ($parentUserId <= 0 || $studentId <= 0) error('parentUserId and studentId are required', 400);
 
+        // A student can only have one parent.
+        $checkStmt = getDb()->prepare("SELECT parent_user_id FROM parent_student_links WHERE student_id = ?");
+        $checkStmt->execute([$studentId]);
+        if ($checkStmt->fetch()) {
+            error('This student already has a parent', 409);
+        }
+
         try {
             $stmt = getDb()->prepare("INSERT INTO parent_student_links (parent_user_id, student_id) VALUES (?, ?)");
             $stmt->execute([$parentUserId, $studentId]);
@@ -309,6 +390,16 @@ if ($resource === 'students') {
     $isParent = ($user['role'] ?? '') === 'parent';
     $parentStudentIds = $isParent ? getParentLinkedStudentIds($user) : [];
 
+    function fetchStudentLessons($studentId) {
+        try {
+            $stmt = getDb()->prepare("SELECT course_id FROM student_courses WHERE student_id = ?");
+            $stmt->execute([$studentId]);
+            return array_map('intval', array_column($stmt->fetchAll(), 'course_id'));
+        } catch (PDOException $e) {
+            return [];
+        }
+    }
+
     if ($method === 'GET' && !$id) {
         if ($isParent && empty($parentStudentIds)) {
             json([]);
@@ -332,7 +423,7 @@ if ($resource === 'students') {
                 return isset($allowed[(int)($r['id'] ?? 0)]);
             }));
         }
-        foreach ($rows as &$row) { $row['lessons'] = json_decode($row['lessons'] ?? '[]', true) ?: []; $row['assigned_surveys'] = json_decode($row['assigned_surveys'] ?? '[]', true) ?: []; }
+        foreach ($rows as &$row) { $row['lessons'] = fetchStudentLessons((int)$row['id']); $row['assigned_surveys'] = json_decode($row['assigned_surveys'] ?? '[]', true) ?: []; }
         json($rows);
     }
     if ($method === 'GET' && $id) {
@@ -352,7 +443,7 @@ if ($resource === 'students') {
                 error('Failed to fetch student: ' . $fallbackError->getMessage(), 500);
             }
         }
-        if ($row) { $row['lessons'] = json_decode($row['lessons'] ?? '[]', true) ?: []; $row['assigned_surveys'] = json_decode($row['assigned_surveys'] ?? '[]', true) ?: []; }
+        if ($row) { $row['lessons'] = fetchStudentLessons((int)$row['id']); $row['assigned_surveys'] = json_decode($row['assigned_surveys'] ?? '[]', true) ?: []; }
         json($row ?: null);
     }
     if ($method === 'POST' && !$id) {
@@ -376,8 +467,7 @@ if ($resource === 'students') {
             if (!$g->fetch()) $groupId = null;
         }
 
-        $stmt = getDb()->prepare("INSERT INTO students (tc_kimlik, first_name, last_name, birth_year, city, school_id, school_name, grade, phone, parent_name, parent_phone, email, lessons, group_id, age) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        $lessons = json_encode($body['lessons'] ?? []);
+        $stmt = getDb()->prepare("INSERT INTO students (tc_kimlik, first_name, last_name, birth_year, city, school_id, school_name, grade, phone, parent_name, parent_phone, email, group_id, age) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $birthYear = isset($body['birthYear']) && is_numeric($body['birthYear']) ? (int)$body['birthYear'] : null;
         $age = $birthYear ? (int)date('Y') - $birthYear : null;
 
@@ -387,13 +477,21 @@ if ($resource === 'students') {
                 $birthYear, $body['city'] ?? '', $schoolId,
                 $body['schoolName'] ?? null, $body['grade'] ?? '', $body['phone'] ?? '',
                 $body['parentName'] ?? '', $body['parentPhone'] ?? '', $body['email'] ?? '',
-                $lessons, $groupId, $age
+                $groupId, $age
             ]);
+            $studentId = (int)getDb()->lastInsertId();
+            if (!empty($body['lessons']) && is_array($body['lessons'])) {
+                $ins = getDb()->prepare("INSERT INTO student_courses (student_id, course_id) VALUES (?, ?)");
+                foreach ($body['lessons'] as $courseId) {
+                    $courseId = is_numeric($courseId) ? (int)$courseId : 0;
+                    if ($courseId > 0) $ins->execute([$studentId, $courseId]);
+                }
+            }
         } catch (PDOException $e) {
             error('Failed to create student: ' . $e->getMessage(), 400);
         }
 
-        json(['id' => (int)getDb()->lastInsertId()]);
+        json(['id' => $studentId]);
     }
     if ($method === 'PUT' && $id) {
         $fields = []; $vals = [];
@@ -444,11 +542,6 @@ if ($resource === 'students') {
             $vals[] = $groupId;
         }
 
-        if (array_key_exists('lessons', $body)) {
-            $fields[] = "lessons = ?";
-            $vals[] = json_encode($body['lessons'] ?? []);
-        }
-
         if (array_key_exists('birthYear', $body)) {
             $birthYear = is_numeric($body['birthYear']) ? (int)$body['birthYear'] : null;
             $fields[] = "age = ?";
@@ -458,11 +551,23 @@ if ($resource === 'students') {
             $vals[] = is_numeric($body['age']) ? (int)$body['age'] : null;
         }
 
-        if (empty($fields)) error('No fields to update');
+        $hasLessonUpdate = array_key_exists('lessons', $body);
+        if (empty($fields) && !$hasLessonUpdate) error('No fields to update');
         $vals[] = $id;
         $stmt = getDb()->prepare("UPDATE students SET " . implode(', ', $fields) . " WHERE id = ?");
         try {
             $stmt->execute($vals);
+            if ($hasLessonUpdate) {
+                getDb()->prepare("DELETE FROM student_courses WHERE student_id = ?")->execute([$id]);
+                $lessons = $body['lessons'] ?? [];
+                if (is_array($lessons) && !empty($lessons)) {
+                    $ins = getDb()->prepare("INSERT INTO student_courses (student_id, course_id) VALUES (?, ?)");
+                    foreach ($lessons as $courseId) {
+                        $courseId = is_numeric($courseId) ? (int)$courseId : 0;
+                        if ($courseId > 0) $ins->execute([$id, $courseId]);
+                    }
+                }
+            }
         } catch (PDOException $e) {
             error('Failed to update student: ' . $e->getMessage(), 400);
         }
@@ -471,6 +576,34 @@ if ($resource === 'students') {
     if ($method === 'DELETE' && $id) {
         getDb()->prepare("DELETE FROM students WHERE id = ?")->execute([$id]);
         json(['message' => 'Deleted']);
+    }
+}
+
+// ===== STUDENT COURSE ASSIGNMENTS =====
+if ($resource === 'student-course-assignments') {
+    $user = getAuthUser();
+    if (!in_array($user['role'] ?? '', ['superadmin', 'admin', 'authorized_teacher'], true)) {
+        error('Forbidden', 403);
+    }
+
+    if ($method === 'POST' && !$id) {
+        $studentIds = $body['studentIds'] ?? [];
+        $courseId = isset($body['courseId']) && is_numeric($body['courseId']) ? (int)$body['courseId'] : 0;
+        if ($courseId <= 0 || !is_array($studentIds) || empty($studentIds)) {
+            error('studentIds array and courseId are required', 400);
+        }
+        try {
+            $stmt = getDb()->prepare("INSERT IGNORE INTO student_courses (student_id, course_id) VALUES (?, ?)");
+            $assigned = 0;
+            foreach ($studentIds as $sid) {
+                if (!is_numeric($sid)) continue;
+                $stmt->execute([(int)$sid, $courseId]);
+                if ($stmt->rowCount() > 0) $assigned++;
+            }
+            json(['message' => 'Assigned', 'assigned' => $assigned]);
+        } catch (PDOException $e) {
+            error('Failed to assign course: ' . $e->getMessage(), 400);
+        }
     }
 }
 
@@ -534,15 +667,15 @@ if ($resource === 'schools') {
     }
 }
 
-// ===== LESSONS =====
+// ===== LESSONS (Course Schedules) =====
 if ($resource === 'lessons') {
     if ($method === 'GET' && !$id) {
         try {
-            $stmt = getDb()->query("SELECT l.*, u.full_name as teacher_name FROM lessons l LEFT JOIN users u ON l.teacher_id = u.id ORDER BY l.id");
+            $stmt = getDb()->query("SELECT cs.*, c.name, c.description, u.full_name as teacher_name FROM course_schedules cs LEFT JOIN courses c ON cs.course_id = c.id LEFT JOIN users u ON cs.teacher_id = u.id ORDER BY c.name, cs.day_of_week, cs.start_time");
             json($stmt->fetchAll());
         } catch (PDOException $e) {
             try {
-                $stmt = getDb()->query("SELECT l.*, NULL as teacher_name FROM lessons l ORDER BY l.id");
+                $stmt = getDb()->query("SELECT cs.*, c.name, c.description, NULL as teacher_name FROM course_schedules cs LEFT JOIN courses c ON cs.course_id = c.id ORDER BY c.name, cs.day_of_week, cs.start_time");
                 json($stmt->fetchAll());
             } catch (PDOException $fallbackError) {
                 error('Failed to fetch lessons: ' . $fallbackError->getMessage(), 500);
@@ -550,52 +683,213 @@ if ($resource === 'lessons') {
         }
     }
     if ($method === 'POST' && !$id) {
-        $stmt = getDb()->prepare("INSERT INTO lessons (name, start_time, end_time, day_of_week, teacher_id) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$body['name'], $body['startTime'] ?? '', $body['endTime'] ?? '', $body['dayOfWeek'] ?? '', $body['teacherId'] ?? null]);
-        json(['id' => (int)getDb()->lastInsertId()]);
+        requireRole(['superadmin', 'admin']);
+        $courseName = trim($body['name'] ?? '');
+        if ($courseName === '') error('Course name is required', 400);
+        $teacherId = isset($body['teacherId']) && is_numeric($body['teacherId']) ? (int)$body['teacherId'] : null;
+        $classRoomId = isset($body['classRoomId']) && is_numeric($body['classRoomId']) ? (int)$body['classRoomId'] : null;
+        $dayOfWeek = $body['dayOfWeek'] ?? '';
+        $startTime = $body['startTime'] ?? '';
+        $endTime = $body['endTime'] ?? '';
+        $active = isset($body['active']) ? (bool)$body['active'] : true;
+
+        $courseStmt = getDb()->prepare("SELECT id FROM courses WHERE name = ?");
+        $courseStmt->execute([$courseName]);
+        $courseId = (int)$courseStmt->fetchColumn();
+        if (!$courseId) {
+            getDb()->prepare("INSERT INTO courses (name, description, active) VALUES (?, ?, ?)")
+                ->execute([$courseName, $body['description'] ?? '', $active ? 1 : 0]);
+            $courseId = (int)getDb()->lastInsertId();
+        }
+        getDb()->prepare("INSERT INTO course_schedules (course_id, teacher_id, class_room_id, day_of_week, start_time, end_time, active) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            ->execute([$courseId, $teacherId, $classRoomId, $dayOfWeek, $startTime, $endTime, $active ? 1 : 0]);
+        json(['id' => (int)getDb()->lastInsertId(), 'courseId' => $courseId]);
     }
     if ($method === 'PUT' && $id) {
-        $fields = []; $vals = [];
-        foreach (['name' => 'name', 'startTime' => 'start_time', 'endTime' => 'end_time', 'dayOfWeek' => 'day_of_week', 'teacherId' => 'teacher_id', 'active' => 'active'] as $k => $c) {
-            if (isset($body[$k])) { $fields[] = "$c = ?"; $vals[] = $body[$k]; }
+        requireRole(['superadmin', 'admin']);
+        $scheduleStmt = getDb()->prepare("SELECT course_id FROM course_schedules WHERE id = ?");
+        $scheduleStmt->execute([$id]);
+        $courseId = (int)$scheduleStmt->fetchColumn();
+        if (!$courseId) error('Schedule not found', 404);
+
+        $courseFields = []; $courseVals = [];
+        if (isset($body['name'])) { $courseFields[] = "name = ?"; $courseVals[] = $body['name']; }
+        if (isset($body['description'])) { $courseFields[] = "description = ?"; $courseVals[] = $body['description']; }
+        if (isset($body['active'])) { $courseFields[] = "active = ?"; $courseVals[] = $body['active'] ? 1 : 0; }
+        if (!empty($courseFields)) {
+            $courseVals[] = $courseId;
+            getDb()->prepare("UPDATE courses SET " . implode(', ', $courseFields) . " WHERE id = ?")->execute($courseVals);
         }
-        if (empty($fields)) error('No fields to update');
-        $vals[] = $id;
-        getDb()->prepare("UPDATE lessons SET " . implode(', ', $fields) . " WHERE id = ?")->execute($vals);
+
+        $scheduleFields = []; $scheduleVals = [];
+        foreach (['teacherId' => 'teacher_id', 'classRoomId' => 'class_room_id', 'dayOfWeek' => 'day_of_week', 'startTime' => 'start_time', 'endTime' => 'end_time'] as $k => $c) {
+            if (isset($body[$k])) { $scheduleFields[] = "$c = ?"; $scheduleVals[] = $body[$k]; }
+        }
+        if (isset($body['active'])) { $scheduleFields[] = "active = ?"; $scheduleVals[] = $body['active'] ? 1 : 0; }
+        if (!empty($scheduleFields)) {
+            $scheduleVals[] = $id;
+            getDb()->prepare("UPDATE course_schedules SET " . implode(', ', $scheduleFields) . " WHERE id = ?")->execute($scheduleVals);
+        }
         json(['message' => 'Updated']);
     }
     if ($method === 'DELETE' && $id) {
-        getDb()->prepare("DELETE FROM lessons WHERE id = ?")->execute([$id]);
+        requireRole(['superadmin', 'admin']);
+        $scheduleStmt = getDb()->prepare("SELECT course_id FROM course_schedules WHERE id = ?");
+        $scheduleStmt->execute([$id]);
+        $courseId = (int)$scheduleStmt->fetchColumn();
+        getDb()->prepare("DELETE FROM course_schedules WHERE id = ?")->execute([$id]);
+        $remainingStmt = getDb()->prepare("SELECT COUNT(*) FROM course_schedules WHERE course_id = ?");
+        $remainingStmt->execute([$courseId]);
+        if ((int)$remainingStmt->fetchColumn() === 0) {
+            getDb()->prepare("DELETE FROM courses WHERE id = ?")->execute([$courseId]);
+        }
+        json(['message' => 'Deleted']);
+    }
+}
+
+// ===== COURSES =====
+if ($resource === 'courses') {
+    if ($method === 'GET' && !$id) {
+        $stmt = getDb()->query("SELECT * FROM courses ORDER BY name");
+        json($stmt->fetchAll());
+    }
+    if ($method === 'GET' && $id) {
+        $stmt = getDb()->prepare("SELECT * FROM courses WHERE id = ?");
+        $stmt->execute([$id]);
+        json($stmt->fetch() ?: null);
+    }
+    if ($method === 'POST' && !$id) {
+        requireRole(['superadmin', 'admin']);
+        $name = trim($body['name'] ?? '');
+        if ($name === '') error('Course name is required', 400);
+        getDb()->prepare("INSERT INTO courses (name, description, active) VALUES (?, ?, ?)")
+            ->execute([$name, $body['description'] ?? '', isset($body['active']) ? ($body['active'] ? 1 : 0) : 1]);
+        json(['id' => (int)getDb()->lastInsertId()]);
+    }
+    if ($method === 'PUT' && $id) {
+        requireRole(['superadmin', 'admin']);
+        $fields = []; $vals = [];
+        if (isset($body['name'])) { $fields[] = "name = ?"; $vals[] = trim($body['name']); }
+        if (isset($body['description'])) { $fields[] = "description = ?"; $vals[] = $body['description']; }
+        if (isset($body['active'])) { $fields[] = "active = ?"; $vals[] = $body['active'] ? 1 : 0; }
+        if (empty($fields)) error('No fields to update');
+        $vals[] = $id;
+        getDb()->prepare("UPDATE courses SET " . implode(', ', $fields) . " WHERE id = ?")->execute($vals);
+        json(['message' => 'Updated']);
+    }
+    if ($method === 'DELETE' && $id) {
+        requireRole(['superadmin', 'admin']);
+        getDb()->prepare("DELETE FROM courses WHERE id = ?")->execute([$id]);
+        json(['message' => 'Deleted']);
+    }
+}
+
+// ===== COURSE SCHEDULES =====
+if ($resource === 'course-schedules') {
+    if ($method === 'GET' && !$id) {
+        try {
+            $stmt = getDb()->query("SELECT cs.*, c.name, c.description, u.full_name as teacher_name FROM course_schedules cs LEFT JOIN courses c ON cs.course_id = c.id LEFT JOIN users u ON cs.teacher_id = u.id ORDER BY c.name, cs.day_of_week, cs.start_time");
+            json($stmt->fetchAll());
+        } catch (PDOException $e) {
+            try {
+                $stmt = getDb()->query("SELECT cs.*, c.name, c.description, NULL as teacher_name FROM course_schedules cs LEFT JOIN courses c ON cs.course_id = c.id ORDER BY c.name, cs.day_of_week, cs.start_time");
+                json($stmt->fetchAll());
+            } catch (PDOException $fallbackError) {
+                error('Failed to fetch course schedules: ' . $fallbackError->getMessage(), 500);
+            }
+        }
+    }
+    if ($method === 'GET' && $id) {
+        $stmt = getDb()->prepare("SELECT cs.*, c.name, c.description, u.full_name as teacher_name FROM course_schedules cs LEFT JOIN courses c ON cs.course_id = c.id LEFT JOIN users u ON cs.teacher_id = u.id WHERE cs.id = ?");
+        $stmt->execute([$id]);
+        json($stmt->fetch() ?: null);
+    }
+    if ($method === 'POST' && !$id) {
+        requireRole(['superadmin', 'admin']);
+        $courseId = isset($body['courseId']) && is_numeric($body['courseId']) ? (int)$body['courseId'] : 0;
+        if ($courseId <= 0) error('courseId is required', 400);
+        $teacherId = isset($body['teacherId']) && is_numeric($body['teacherId']) ? (int)$body['teacherId'] : null;
+        $classRoomId = isset($body['classRoomId']) && is_numeric($body['classRoomId']) ? (int)$body['classRoomId'] : null;
+        getDb()->prepare("INSERT INTO course_schedules (course_id, teacher_id, class_room_id, day_of_week, start_time, end_time, active) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            ->execute([$courseId, $teacherId, $classRoomId, $body['dayOfWeek'] ?? '', $body['startTime'] ?? '', $body['endTime'] ?? '', isset($body['active']) ? ($body['active'] ? 1 : 0) : 1]);
+        json(['id' => (int)getDb()->lastInsertId()]);
+    }
+    if ($method === 'PUT' && $id) {
+        requireRole(['superadmin', 'admin']);
+        $fields = []; $vals = [];
+        foreach (['courseId' => 'course_id', 'teacherId' => 'teacher_id', 'classRoomId' => 'class_room_id', 'dayOfWeek' => 'day_of_week', 'startTime' => 'start_time', 'endTime' => 'end_time'] as $k => $c) {
+            if (isset($body[$k])) { $fields[] = "$c = ?"; $vals[] = $body[$k]; }
+        }
+        if (isset($body['active'])) { $fields[] = "active = ?"; $vals[] = $body['active'] ? 1 : 0; }
+        if (empty($fields)) error('No fields to update');
+        $vals[] = $id;
+        getDb()->prepare("UPDATE course_schedules SET " . implode(', ', $fields) . " WHERE id = ?")->execute($vals);
+        json(['message' => 'Updated']);
+    }
+    if ($method === 'DELETE' && $id) {
+        requireRole(['superadmin', 'admin']);
+        getDb()->prepare("DELETE FROM course_schedules WHERE id = ?")->execute([$id]);
         json(['message' => 'Deleted']);
     }
 }
 
 // ===== CLASS ROOMS (GROUPS) =====
 if ($resource === 'class-rooms') {
+    function fetchClassRoomCourseIds($classRoomId) {
+        try {
+            $stmt = getDb()->prepare("SELECT course_id FROM class_room_courses WHERE class_room_id = ?");
+            $stmt->execute([$classRoomId]);
+            return array_map('intval', array_column($stmt->fetchAll(), 'course_id'));
+        } catch (PDOException $e) {
+            return [];
+        }
+    }
+
     if ($method === 'GET' && !$id) {
         $stmt = getDb()->query("SELECT cr.*, s.name as school_name FROM class_rooms cr LEFT JOIN schools s ON cr.school_id = s.id ORDER BY cr.id");
         $rows = $stmt->fetchAll();
         foreach ($rows as &$row) {
-            $row['lesson_ids'] = json_decode($row['lesson_ids'] ?? '[]', true) ?: [];
+            $row['lesson_ids'] = fetchClassRoomCourseIds((int)$row['id']);
             $row['teacher_ids'] = json_decode($row['teacher_ids'] ?? '[]', true) ?: [];
         }
         json($rows);
     }
     if ($method === 'POST' && !$id) {
-        $stmt = getDb()->prepare("INSERT INTO class_rooms (name, grade, school_id, description, lesson_ids, teacher_ids, active) VALUES (?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$body['name'], $body['grade'], $body['schoolId'], $body['description'] ?? '', json_encode($body['lessonIds'] ?? []), json_encode($body['teacherIds'] ?? []), $body['active'] ?? true]);
-        json(['id' => (int)getDb()->lastInsertId()]);
+        $stmt = getDb()->prepare("INSERT INTO class_rooms (name, grade, school_id, description, teacher_ids, active) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$body['name'], $body['grade'], $body['schoolId'], $body['description'] ?? '', json_encode($body['teacherIds'] ?? []), $body['active'] ?? true]);
+        $classRoomId = (int)getDb()->lastInsertId();
+        if (!empty($body['lessonIds']) && is_array($body['lessonIds'])) {
+            $ins = getDb()->prepare("INSERT INTO class_room_courses (class_room_id, course_id) VALUES (?, ?)");
+            foreach ($body['lessonIds'] as $courseId) {
+                $courseId = is_numeric($courseId) ? (int)$courseId : 0;
+                if ($courseId > 0) $ins->execute([$classRoomId, $courseId]);
+            }
+        }
+        json(['id' => $classRoomId]);
     }
     if ($method === 'PUT' && $id) {
         $fields = []; $vals = [];
         foreach (['name' => 'name', 'grade' => 'grade', 'schoolId' => 'school_id', 'description' => 'description', 'active' => 'active'] as $k => $c) {
             if (isset($body[$k])) { $fields[] = "$c = ?"; $vals[] = $body[$k]; }
         }
-        if (isset($body['lessonIds'])) { $fields[] = "lesson_ids = ?"; $vals[] = json_encode($body['lessonIds']); }
         if (isset($body['teacherIds'])) { $fields[] = "teacher_ids = ?"; $vals[] = json_encode($body['teacherIds']); }
-        if (empty($fields)) error('No fields to update');
-        $vals[] = $id;
-        getDb()->prepare("UPDATE class_rooms SET " . implode(', ', $fields) . " WHERE id = ?")->execute($vals);
+        $hasLessonIds = isset($body['lessonIds']);
+        if (empty($fields) && !$hasLessonIds) error('No fields to update');
+        if (!empty($fields)) {
+            $vals[] = $id;
+            getDb()->prepare("UPDATE class_rooms SET " . implode(', ', $fields) . " WHERE id = ?")->execute($vals);
+        }
+        if ($hasLessonIds) {
+            getDb()->prepare("DELETE FROM class_room_courses WHERE class_room_id = ?")->execute([$id]);
+            $lessonIds = $body['lessonIds'] ?? [];
+            if (is_array($lessonIds) && !empty($lessonIds)) {
+                $ins = getDb()->prepare("INSERT INTO class_room_courses (class_room_id, course_id) VALUES (?, ?)");
+                foreach ($lessonIds as $courseId) {
+                    $courseId = is_numeric($courseId) ? (int)$courseId : 0;
+                    if ($courseId > 0) $ins->execute([$id, $courseId]);
+                }
+            }
+        }
         json(['message' => 'Updated']);
     }
     if ($method === 'DELETE' && $id) {
@@ -608,14 +902,14 @@ if ($resource === 'class-rooms') {
 if ($resource === 'attendance') {
     if ($method === 'GET' && !$id) {
         $studentId = $_GET['studentId'] ?? null;
+        $classRoomId = $_GET['classRoomId'] ?? null;
         $date = $_GET['date'] ?? null;
         $params = [];
 
-        // Primary query includes lesson_name. Some older production schemas may not
-        // have compatible lesson relation/columns yet; fallback keeps endpoint alive.
         try {
-            $sql = "SELECT a.*, s.first_name, s.last_name, l.name as lesson_name FROM attendance a LEFT JOIN students s ON a.student_id = s.id LEFT JOIN lessons l ON a.lesson_id = l.id WHERE 1=1";
+            $sql = "SELECT a.*, s.first_name, s.last_name, cr.name as class_room_name FROM attendance a LEFT JOIN students s ON a.student_id = s.id LEFT JOIN class_rooms cr ON a.class_room_id = cr.id WHERE 1=1";
             if ($studentId) { $sql .= " AND a.student_id = ?"; $params[] = $studentId; }
+            if ($classRoomId) { $sql .= " AND a.class_room_id = ?"; $params[] = $classRoomId; }
             if ($date) { $sql .= " AND a.date = ?"; $params[] = $date; }
             $sql .= " ORDER BY a.id DESC";
             $stmt = getDb()->prepare($sql);
@@ -623,8 +917,9 @@ if ($resource === 'attendance') {
             json($stmt->fetchAll());
         } catch (PDOException $e) {
             $params = [];
-            $fallbackSql = "SELECT a.*, s.first_name, s.last_name, NULL as lesson_name FROM attendance a LEFT JOIN students s ON a.student_id = s.id WHERE 1=1";
+            $fallbackSql = "SELECT a.*, s.first_name, s.last_name, NULL as class_room_name FROM attendance a LEFT JOIN students s ON a.student_id = s.id WHERE 1=1";
             if ($studentId) { $fallbackSql .= " AND a.student_id = ?"; $params[] = $studentId; }
+            if ($classRoomId) { $fallbackSql .= " AND a.class_room_id = ?"; $params[] = $classRoomId; }
             if ($date) { $fallbackSql .= " AND a.date = ?"; $params[] = $date; }
             $fallbackSql .= " ORDER BY a.id DESC";
             $stmt = getDb()->prepare($fallbackSql);
@@ -633,9 +928,9 @@ if ($resource === 'attendance') {
         }
     }
     if ($method === 'POST' && !$id) {
-        $stmt = getDb()->prepare("INSERT INTO attendance (student_id, lesson_id, date, status, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt = getDb()->prepare("INSERT INTO attendance (student_id, class_room_id, date, status, notes, created_by) VALUES (?, ?, ?, ?, ?, ?)");
         $user = getAuthUser();
-        $stmt->execute([$body['studentId'], $body['lessonId'] ?? null, $body['date'], $body['status'] ?? 'present', $body['notes'] ?? '', $user['id'] ?? null]);
+        $stmt->execute([$body['studentId'], $body['classRoomId'] ?? null, $body['date'], $body['status'] ?? 'present', $body['notes'] ?? '', $user['id'] ?? null]);
         json(['id' => (int)getDb()->lastInsertId()]);
     }
     if ($method === 'PUT' && $id) {
@@ -667,19 +962,19 @@ if ($resource === 'progress') {
         json($stmt->fetchAll());
     }
     if ($method === 'POST' && !$id) {
-        $stmt = getDb()->prepare("INSERT INTO progress (student_id, date, kuran_current_page, kuran_target_page, risale_current_page, risale_target_page, elifba_current_page, elifba_target_page, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt = getDb()->prepare("INSERT INTO progress (student_id, date, kuran_current_page, kuran_target_page, kuran_pages, risale_current_page, risale_target_page, risale_pages, elifba_current_page, elifba_target_page, notes, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $user = getAuthUser();
         $stmt->execute([
             $body['studentId'], $body['date'],
-            $body['kuranCurrentPage'] ?? 0, $body['kuranTargetPage'] ?? 0,
-            $body['risaleCurrentPage'] ?? 0, $body['risaleTargetPage'] ?? 0,
+            $body['kuranCurrentPage'] ?? 0, $body['kuranTargetPage'] ?? 0, $body['kuranPages'] ?? 0,
+            $body['risaleCurrentPage'] ?? 0, $body['risaleTargetPage'] ?? 0, $body['risalePages'] ?? 0,
             $body['elifbaCurrentPage'] ?? 0, $body['elifbaTargetPage'] ?? 0,
             $body['notes'] ?? '', $user['id'] ?? null
         ]);
         json(['id' => (int)getDb()->lastInsertId()]);
     }
     if ($method === 'PUT' && $id) {
-        $map = ['kuranCurrentPage' => 'kuran_current_page', 'kuranTargetPage' => 'kuran_target_page', 'risaleCurrentPage' => 'risale_current_page', 'risaleTargetPage' => 'risale_target_page', 'elifbaCurrentPage' => 'elifba_current_page', 'elifbaTargetPage' => 'elifba_target_page', 'notes' => 'notes'];
+        $map = ['kuranCurrentPage' => 'kuran_current_page', 'kuranTargetPage' => 'kuran_target_page', 'kuranPages' => 'kuran_pages', 'risaleCurrentPage' => 'risale_current_page', 'risaleTargetPage' => 'risale_target_page', 'risalePages' => 'risale_pages', 'elifbaCurrentPage' => 'elifba_current_page', 'elifbaTargetPage' => 'elifba_target_page', 'notes' => 'notes'];
         $fields = []; $vals = [];
         foreach ($map as $k => $c) { if (isset($body[$k])) { $fields[] = "$c = ?"; $vals[] = $body[$k]; } }
         if (empty($fields)) error('No fields to update');
@@ -932,19 +1227,50 @@ if ($resource === 'survey-answers') {
 // ===== HOMEWORK TEMPLATES =====
 if ($resource === 'homework-templates') {
     if ($method === 'GET' && !$id) {
-        $stmt = getDb()->query("SELECT ht.*, l.name as lesson_name FROM homework_templates ht LEFT JOIN lessons l ON ht.lesson_id = l.id ORDER BY ht.id");
-        json($stmt->fetchAll());
+        try {
+            $stmt = getDb()->query("SELECT ht.*, c.name as course_name FROM homework_templates ht LEFT JOIN courses c ON ht.course_id = c.id ORDER BY ht.id");
+            json($stmt->fetchAll());
+        } catch (PDOException $e) {
+            // Fallback for legacy schemas where courses table/column may differ.
+            try {
+                $stmt = getDb()->query("SELECT * FROM homework_templates ORDER BY id");
+                json($stmt->fetchAll());
+            } catch (PDOException $fallbackError) {
+                error('Failed to fetch homework templates: ' . $fallbackError->getMessage(), 500);
+            }
+        }
     }
     if ($method === 'POST' && !$id) {
-        $stmt = getDb()->prepare("INSERT INTO homework_templates (title, content, details, lesson_id, created_by) VALUES (?, ?, ?, ?, ?)");
-        $user = getAuthUser();
-        $stmt->execute([$body['title'], $body['content'] ?? '', $body['details'] ?? '', $body['lessonId'] ?? null, $user['id'] ?? null]);
+        $columns = ['title', 'content', 'details', 'course_id', 'created_by'];
+        $values = [
+            $body['title'] ?? '',
+            $body['content'] ?? '',
+            $body['details'] ?? '',
+            $body['lessonId'] ?? null,
+            $user['id'] ?? null,
+        ];
+        if (columnExists('homework_templates', 'active')) {
+            $columns[] = 'active';
+            $values[] = isset($body['active']) ? ($body['active'] ? 1 : 0) : 1;
+        }
+        if (columnExists('homework_templates', 'type')) {
+            $columns[] = 'type';
+            $values[] = $body['type'] ?? 'diger';
+        }
+        $stmt = getDb()->prepare("INSERT INTO homework_templates (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
+        $stmt->execute($values);
         json(['id' => (int)getDb()->lastInsertId()]);
     }
     if ($method === 'PUT' && $id) {
         $fields = []; $vals = [];
-        foreach (['title' => 'title', 'content' => 'content', 'details' => 'details', 'lessonId' => 'lesson_id'] as $k => $c) {
+        foreach (['title' => 'title', 'content' => 'content', 'details' => 'details', 'lessonId' => 'course_id'] as $k => $c) {
             if (isset($body[$k])) { $fields[] = "$c = ?"; $vals[] = $body[$k]; }
+        }
+        if (columnExists('homework_templates', 'active') && array_key_exists('active', $body)) {
+            $fields[] = "active = ?"; $vals[] = $body['active'] ? 1 : 0;
+        }
+        if (columnExists('homework_templates', 'type') && array_key_exists('type', $body)) {
+            $fields[] = "type = ?"; $vals[] = $body['type'];
         }
         if (empty($fields)) error('No fields to update');
         $vals[] = $id;
@@ -1044,7 +1370,6 @@ if ($resource === 'memorization-tracking') {
                 if (!$isTeacherRestricted) return true;
                 if (!$studentId || !is_numeric($studentId)) return false;
 
-                // MariaDB compatibility: compare JSON-array-like strings via FIND_IN_SET.
                 $sql = "SELECT COUNT(*)
                                 FROM students s
                                 LEFT JOIN class_rooms cr ON cr.id = s.group_id
@@ -1052,12 +1377,10 @@ if ($resource === 'memorization-tracking') {
                                     AND (
                                         EXISTS (
                                             SELECT 1
-                                            FROM teacher_lessons tl
-                                            WHERE tl.teacher_id = ?
-                                                AND FIND_IN_SET(
-                                                            CAST(tl.lesson_id AS CHAR),
-                                                            REPLACE(REPLACE(REPLACE(COALESCE(s.lessons, '[]'), '[', ''), ']', ''), ' ', '')
-                                                        ) > 0
+                                            FROM course_schedules cs
+                                            JOIN student_courses sc ON sc.course_id = cs.course_id
+                                            WHERE cs.teacher_id = ?
+                                                AND sc.student_id = s.id
                                         )
                                         OR (
                                             cr.id IS NOT NULL
@@ -1121,6 +1444,60 @@ if ($resource === 'memorization-tracking') {
         json($stmt->fetchAll());
     }
 
+    if ($method === 'GET' && $id === 'summary') {
+        $studentId = isset($_GET['studentId']) ? (int)$_GET['studentId'] : 0;
+        if ($studentId <= 0) error('studentId is required', 400);
+        if (!$canAccessStudent($studentId)) error('Forbidden', 403);
+
+        $sql = "SELECT mt.id, mt.student_id, mt.text_id, mt.status, mt.scores, mt.teacher_note, mt.checked_at, mt.updated_at, mtxt.title as text_title, u.full_name as checked_by_name
+                FROM memorization_tracking mt
+                LEFT JOIN memorization_texts mtxt ON mt.text_id = mtxt.id
+                LEFT JOIN users u ON mt.checked_by = u.id
+                WHERE mt.student_id = ?
+                ORDER BY mt.checked_at DESC, mt.updated_at DESC, mt.id DESC";
+        $stmt = getDb()->prepare($sql);
+        $stmt->execute([$studentId]);
+        $rows = $stmt->fetchAll();
+
+        $counts = ['passed' => 0, 'failed' => 0, 'repeat_tecvid' => 0, 'repeat_harf' => 0];
+        $recent = [];
+        $needsRepeat = [];
+        foreach ($rows as $r) {
+            $status = $r['status'];
+            if (array_key_exists($status, $counts)) $counts[$status]++;
+            $item = [
+                'id' => (int)$r['id'],
+                'studentId' => (int)$r['student_id'],
+                'textId' => (int)$r['text_id'],
+                'textTitle' => $r['text_title'] ?: ('Metin #' . $r['text_id']),
+                'status' => $status,
+                'scores' => json_decode($r['scores'] ?? 'null', true),
+                'teacherNote' => $r['teacher_note'] ?? '',
+                'checkedAt' => $r['checked_at'] ?? '',
+                'updatedAt' => $r['updated_at'] ?? '',
+                'checkedByName' => $r['checked_by_name'] ?? '',
+            ];
+            $recent[] = $item;
+            if (in_array($status, ['failed', 'repeat_tecvid', 'repeat_harf'], true)) {
+                $needsRepeat[] = $item;
+            }
+        }
+        $total = count($rows);
+        $successRate = $total > 0 ? round(($counts['passed'] / $total) * 100, 2) : 0;
+        json([
+            'studentId' => $studentId,
+            'total' => $total,
+            'passed' => $counts['passed'],
+            'failed' => $counts['failed'],
+            'repeatTecvid' => $counts['repeat_tecvid'],
+            'repeatHarf' => $counts['repeat_harf'],
+            'successRate' => $successRate,
+            'recent' => $recent,
+            'needsRepeat' => $needsRepeat,
+            'statusCounts' => $counts,
+        ]);
+    }
+
     if ($method === 'GET' && $id) {
         $stmt = getDb()->prepare("SELECT mt.*, s.first_name, s.last_name, mtxt.title as text_title, u.full_name as checked_by_name
                                   FROM memorization_tracking mt
@@ -1139,23 +1516,27 @@ if ($resource === 'memorization-tracking') {
 
         $studentId = isset($body['studentId']) ? (int)$body['studentId'] : 0;
         $textId = isset($body['textId']) ? (int)$body['textId'] : 0;
-        $status = $body['status'] ?? 'not_completed';
+        $status = $body['status'] ?? 'failed';
         $teacherNote = $body['teacherNote'] ?? '';
-        $allowedStatuses = ['completed', 'repeat', 'not_completed'];
+        $allowedStatuses = ['passed', 'failed', 'repeat_tecvid', 'repeat_harf'];
 
         if ($studentId <= 0 || $textId <= 0) error('studentId and textId are required', 400);
         if (!in_array($status, $allowedStatuses, true)) error('Invalid status', 400);
         if (!$canAccessStudent($studentId)) error('Forbidden', 403);
 
-        $sql = "INSERT INTO memorization_tracking (student_id, text_id, status, teacher_note, checked_by, checked_at)
-                VALUES (?, ?, ?, ?, ?, NOW())
+        $scores = array_key_exists('scores', $body) ? $body['scores'] : null;
+        $scoresJson = $scores === null ? null : json_encode($scores);
+
+        $sql = "INSERT INTO memorization_tracking (student_id, text_id, status, scores, teacher_note, checked_by, checked_at)
+                VALUES (?, ?, ?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE
                   status = VALUES(status),
+                  scores = VALUES(scores),
                   teacher_note = VALUES(teacher_note),
                   checked_by = VALUES(checked_by),
                   checked_at = NOW()";
         $stmt = getDb()->prepare($sql);
-        $stmt->execute([$studentId, $textId, $status, $teacherNote, $user['id'] ?? null]);
+        $stmt->execute([$studentId, $textId, $status, $scoresJson, $teacherNote, $user['id'] ?? null]);
 
         json(['message' => 'Saved']);
     }
@@ -1171,13 +1552,14 @@ if ($resource === 'memorization-tracking') {
 
         $fields = []; $vals = [];
         if (array_key_exists('status', $body)) {
-            $allowedStatuses = ['completed', 'repeat', 'not_completed'];
+            $allowedStatuses = ['passed', 'failed', 'repeat_tecvid', 'repeat_harf'];
             if (!in_array($body['status'], $allowedStatuses, true)) error('Invalid status', 400);
             $fields[] = "status = ?"; $vals[] = $body['status'];
             $fields[] = "checked_at = NOW()";
             $fields[] = "checked_by = ?"; $vals[] = $user['id'] ?? null;
         }
         if (array_key_exists('teacherNote', $body)) { $fields[] = "teacher_note = ?"; $vals[] = $body['teacherNote']; }
+        if (array_key_exists('scores', $body)) { $fields[] = "scores = ?"; $vals[] = $body['scores'] === null ? null : json_encode($body['scores']); }
         if (empty($fields)) error('No fields to update');
 
         $vals[] = $id;
@@ -1188,6 +1570,51 @@ if ($resource === 'memorization-tracking') {
     if ($method === 'DELETE' && $id) {
         requireRole(['superadmin', 'admin']);
         getDb()->prepare("DELETE FROM memorization_tracking WHERE id = ?")->execute([$id]);
+        json(['message' => 'Deleted']);
+    }
+}
+
+// ===== MEMORIZATION CRITERIA =====
+if ($resource === 'memorization-criteria') {
+    if ($method === 'GET' && !$id) {
+        $stmt = getDb()->query("SELECT * FROM memorization_criteria ORDER BY sort_order, id");
+        json($stmt->fetchAll());
+    }
+    if ($method === 'GET' && $id) {
+        $stmt = getDb()->prepare("SELECT * FROM memorization_criteria WHERE id = ?");
+        $stmt->execute([$id]);
+        json($stmt->fetch() ?: null);
+    }
+    if ($method === 'POST' && !$id) {
+        requireRole(['superadmin', 'admin']);
+        $code = trim($body['code'] ?? '');
+        $label = trim($body['label'] ?? '');
+        if ($code === '' || $label === '') error('code and label are required', 400);
+        $maxScore = isset($body['maxScore']) ? (int)$body['maxScore'] : 100;
+        $weight = isset($body['weight']) ? (int)$body['weight'] : 1;
+        $sortOrder = isset($body['sortOrder']) ? (int)$body['sortOrder'] : 0;
+        $active = isset($body['active']) ? (bool)$body['active'] : true;
+        $stmt = getDb()->prepare("INSERT INTO memorization_criteria (code, label, max_score, weight, sort_order, active) VALUES (?, ?, ?, ?, ?, ?)");
+        $stmt->execute([$code, $label, $maxScore, $weight, $sortOrder, $active ? 1 : 0]);
+        json(['id' => (int)getDb()->lastInsertId()]);
+    }
+    if ($method === 'PUT' && $id) {
+        requireRole(['superadmin', 'admin']);
+        $fields = []; $vals = [];
+        if (array_key_exists('code', $body)) { $fields[] = "code = ?"; $vals[] = trim($body['code']); }
+        if (array_key_exists('label', $body)) { $fields[] = "label = ?"; $vals[] = trim($body['label']); }
+        if (array_key_exists('maxScore', $body)) { $fields[] = "max_score = ?"; $vals[] = (int)$body['maxScore']; }
+        if (array_key_exists('weight', $body)) { $fields[] = "weight = ?"; $vals[] = (int)$body['weight']; }
+        if (array_key_exists('sortOrder', $body)) { $fields[] = "sort_order = ?"; $vals[] = (int)$body['sortOrder']; }
+        if (array_key_exists('active', $body)) { $fields[] = "active = ?"; $vals[] = (bool)$body['active'] ? 1 : 0; }
+        if (empty($fields)) error('No fields to update');
+        $vals[] = $id;
+        getDb()->prepare("UPDATE memorization_criteria SET " . implode(', ', $fields) . " WHERE id = ?")->execute($vals);
+        json(['message' => 'Updated']);
+    }
+    if ($method === 'DELETE' && $id) {
+        requireRole(['superadmin', 'admin']);
+        getDb()->prepare("DELETE FROM memorization_criteria WHERE id = ?")->execute([$id]);
         json(['message' => 'Deleted']);
     }
 }
@@ -1255,9 +1682,14 @@ if ($resource === 'lesson-logs') {
         json($stmt->fetchAll());
     }
     if ($method === 'POST' && !$id) {
+        $subTopicRequired = strtolower((string)getSystemSetting('sub_topic_required', 'false')) === 'true';
+        if ($subTopicRequired && empty($body['subTopic'])) {
+            http_response_code(422);
+            json(['error' => 'Alt konu zorunludur']);
+        }
         $stmt = getDb()->prepare("INSERT INTO lesson_logs (student_id, date, category, topic, sub_topic, notes, author, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
         $user = getAuthUser();
-        $stmt->execute([$body['studentId'], $body['date'], $body['category'], $body['topic'], $body['subTopic'], $body['notes'] ?? '', $body['author'] ?? $user['full_name'] ?? '', $user['id'] ?? null]);
+        $stmt->execute([$body['studentId'], $body['date'], $body['category'], $body['topic'], $body['subTopic'] ?? null, $body['notes'] ?? '', $body['author'] ?? $user['full_name'] ?? '', $user['id'] ?? null]);
         json(['id' => (int)getDb()->lastInsertId()]);
     }
     if ($method === 'DELETE' && $id) {
@@ -1266,22 +1698,41 @@ if ($resource === 'lesson-logs') {
     }
 }
 
-// ===== TEACHER LESSONS =====
+// ===== SYSTEM SETTINGS =====
+if ($resource === 'system-settings') {
+    $settingKey = $parts[1] ?? null;
+    if ($method === 'GET') {
+        if ($settingKey) {
+            json(['key' => $settingKey, 'value' => getSystemSetting($settingKey)]);
+        } else {
+            $stmt = getDb()->prepare("SELECT `key`, `value` FROM system_settings");
+            $stmt->execute();
+            json($stmt->fetchAll());
+        }
+    }
+    if ($method === 'PUT' && $settingKey) {
+        requireRole(['superadmin', 'admin']);
+        setSystemSetting($settingKey, $body['value'] ?? '');
+        json(['key' => $settingKey, 'value' => $body['value']]);
+    }
+}
+
+// ===== TEACHER LESSONS (Course Schedules) =====
 if ($resource === 'teacher-lessons') {
     if ($method === 'GET') {
         $teacherId = $_GET['teacherId'] ?? null;
         $params = [];
         try {
-            $sql = "SELECT tl.*, l.name as lesson_name, u.full_name as teacher_name FROM teacher_lessons tl LEFT JOIN lessons l ON tl.lesson_id = l.id LEFT JOIN users u ON tl.teacher_id = u.id WHERE 1=1";
-            if ($teacherId) { $sql .= " AND tl.teacher_id = ?"; $params[] = $teacherId; }
+            $sql = "SELECT cs.id, cs.course_id as lesson_id, cs.teacher_id, c.name as lesson_name, u.full_name as teacher_name FROM course_schedules cs LEFT JOIN courses c ON cs.course_id = c.id LEFT JOIN users u ON cs.teacher_id = u.id WHERE 1=1";
+            if ($teacherId) { $sql .= " AND cs.teacher_id = ?"; $params[] = $teacherId; }
             $stmt = getDb()->prepare($sql);
             $stmt->execute($params);
             json($stmt->fetchAll());
         } catch (PDOException $e) {
             try {
                 $params = [];
-                $sql = "SELECT tl.*, NULL as lesson_name, NULL as teacher_name FROM teacher_lessons tl WHERE 1=1";
-                if ($teacherId) { $sql .= " AND tl.teacher_id = ?"; $params[] = $teacherId; }
+                $sql = "SELECT cs.id, cs.course_id as lesson_id, cs.teacher_id, c.name as lesson_name, NULL as teacher_name FROM course_schedules cs LEFT JOIN courses c ON cs.course_id = c.id WHERE 1=1";
+                if ($teacherId) { $sql .= " AND cs.teacher_id = ?"; $params[] = $teacherId; }
                 $stmt = getDb()->prepare($sql);
                 $stmt->execute($params);
                 json($stmt->fetchAll());
@@ -1291,12 +1742,12 @@ if ($resource === 'teacher-lessons') {
         }
     }
     if ($method === 'POST' && !$id) {
-        $stmt = getDb()->prepare("INSERT INTO teacher_lessons (teacher_id, lesson_id) VALUES (?, ?)");
-        $stmt->execute([$body['teacherId'], $body['lessonId']]);
+        $stmt = getDb()->prepare("INSERT INTO course_schedules (course_id, teacher_id) VALUES (?, ?)");
+        $stmt->execute([$body['lessonId'], $body['teacherId']]);
         json(['id' => (int)getDb()->lastInsertId()]);
     }
     if ($method === 'DELETE' && $id) {
-        getDb()->prepare("DELETE FROM teacher_lessons WHERE id = ?")->execute([$id]);
+        getDb()->prepare("DELETE FROM course_schedules WHERE id = ?")->execute([$id]);
         json(['message' => 'Deleted']);
     }
 }
@@ -1346,7 +1797,7 @@ if ($resource === 'dashboard') {
     $stats = [];
     $stats['totalStudents'] = $safeCount("SELECT COUNT(*) FROM students");
     $stats['totalSchools'] = $safeCount("SELECT COUNT(*) FROM schools WHERE active = TRUE");
-    $stats['totalLessons'] = $safeCount("SELECT COUNT(*) FROM lessons WHERE active = TRUE");
+    $stats['totalLessons'] = $safeCount("SELECT COUNT(*) FROM courses WHERE active = TRUE");
     $stats['totalGroups'] = $safeCount("SELECT COUNT(*) FROM class_rooms WHERE active = TRUE");
     $stats['todayAttendance'] = $safeCount("SELECT COUNT(*) FROM attendance WHERE date = ? AND status = 'present'", [date('Y-m-d')]);
     $stats['gradeDistribution'] = $safeRows("SELECT grade, COUNT(*) as count FROM students GROUP BY grade ORDER BY count DESC");

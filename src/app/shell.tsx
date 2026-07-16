@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode, FormEvent } from "react";
+import type { ReactNode } from "react";
 import { Navigate, useNavigate, useLocation } from "react-router";
 import {
-  Eye,
-  EyeOff,
-  Clock,
   Menu,
   ChevronLeft,
   ChevronRight,
@@ -28,15 +25,6 @@ import {
   ListChecks,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/useAuth";
 import { PERMISSIONS, ROLE_COLORS, ROLE_LABELS } from "./constants";
@@ -53,139 +41,7 @@ export function useCollapsibleSidebar() {
   };
 }
 
-export function LoginPage() {
-  const { login, sessionExpired, clearSessionExpired } = useAuth();
-  const navigate = useNavigate();
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPw, setShowPw] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    return () => {
-      clearSessionExpired();
-    };
-  }, [clearSessionExpired]);
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError("");
-    if (!username || !password) {
-      setError("Kullanıcı adı ve şifre gereklidir");
-      return;
-    }
-    const ok = await login(username, password);
-    if (ok) navigate("/");
-    else setError("Geçersiz kullanıcı adı veya şifre");
-  };
-
-  return (
-    <div className="min-h-screen relative flex items-center justify-center p-4 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-emerald-900/90 via-emerald-800/80 to-teal-900/90 z-10" />
-      <div className="absolute left-[5%] bottom-[-5%] w-64 h-80 opacity-20 z-0 rotate-[-8deg] hidden lg:block">
-        <img
-          src="/ots/dist/quran-book.png"
-          alt="Kuran"
-          className="w-full h-full object-contain drop-shadow-2xl"
-        />
-      </div>
-      <div className="absolute right-[5%] bottom-[-5%] w-64 h-80 opacity-20 z-0 rotate-[8deg] hidden lg:block">
-        <img
-          src="/ots/dist/risale-book.png"
-          alt="Risale-i Nur"
-          className="w-full h-full object-contain drop-shadow-2xl"
-        />
-      </div>
-      <div
-        className="absolute inset-0 z-10 opacity-5"
-        style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-        }}
-      />
-      <div className="relative z-20 w-full max-w-md">
-        <div className="flex justify-center items-end gap-4 mb-6 lg:hidden">
-          <img
-            src="/ots/dist/quran-book.png"
-            alt="Kuran"
-            className="w-24 h-32 object-contain rounded-lg shadow-lg opacity-60 rotate-[-6deg]"
-          />
-          <img
-            src="/ots/dist/risale-book.png"
-            alt="Risale-i Nur"
-            className="w-24 h-32 object-contain rounded-lg shadow-lg opacity-60 rotate-[6deg]"
-          />
-        </div>
-        <Card className="shadow-2xl bg-white/95 backdrop-blur-sm border-0">
-          <CardHeader className="text-center pb-2">
-            <div className="bg-emerald-600 w-16 h-16 rounded-xl flex items-center justify-center mx-auto mb-4 shadow-lg overflow-hidden">
-              <img
-                src="/ots/dist/logo-365.jpg"
-                alt="365 Kuran"
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <CardTitle className="text-2xl font-bold text-gray-900">
-              365 Kuran Kuran Mektebi
-            </CardTitle>
-            <CardDescription className="text-emerald-700">
-              Sizin en hayırlınız, Kur'an'ı öğrenen ve öğreteninizdir.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Kullanıcı Adı</Label>
-                <Input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Kullanıcı adınız"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Şifre</Label>
-                <div className="relative">
-                  <Input
-                    type={showPw ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Şifreniz"
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    onClick={() => setShowPw(!showPw)}
-                  >
-                    {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-              {sessionExpired && (
-                <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-700 flex items-center gap-2">
-                  <Clock size={16} />
-                  <span>
-                    <strong>Oturum süreniz doldu.</strong> 10 dakika boyunca
-                    işlem yapılmadığından oturumunuz kapatıldı. Lütfen tekrar
-                    giriş yapın.
-                  </span>
-                </div>
-              )}
-              {error && <p className="text-red-500 text-sm">{error}</p>}
-              <Button
-                type="submit"
-                className="w-full bg-emerald-600 hover:bg-emerald-700"
-              >
-                Giriş Yap
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-        <p className="text-center text-white/50 text-xs mt-4">
-          Kuran ve Risale-i Nur Takip Sistemi
-        </p>
-      </div>
-    </div>
-  );
-}
+export { LoginPage } from "@/app/pages/LoginPage";
 
 export function MainLayout({ children }: { children: ReactNode }) {
   const { currentUser, logout, hasPermission } = useAuth();
@@ -241,7 +97,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
       label: "Yoklama",
       icon: ClipboardCheck,
       path: "/attendance",
-      roles: ["superadmin", "admin", "authorized_teacher"] as const,
+      roles: ["superadmin", "admin", "authorized_teacher", "teacher"] as const,
     },
     {
       id: "progress",
@@ -293,6 +149,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
       roles: ["superadmin", "admin"] as const,
     },
     {
+      id: "homework-tracking",
+      label: "Ödev Takip",
+      icon: ListChecks,
+      path: "/homework-tracking",
+      roles: PERMISSIONS.PROGRESS_CREATE,
+    },
+    {
       id: "memorization-tracking",
       label: "Ezber Takip",
       icon: ListChecks,
@@ -313,25 +176,26 @@ export function MainLayout({ children }: { children: ReactNode }) {
       path: "/users",
       roles: PERMISSIONS.USER_MANAGE,
     },
+    {
+      id: "parent-student-links",
+      label: "Veli-Öğrenci Eşleştirme",
+      icon: Users,
+      path: "/parent-student-links",
+      roles: ["superadmin", "admin"] as const,
+    },
   ];
 
-  const parentLinkedStudentId =
-    currentUser?.role === "parent"
-      ? currentUser.linkedStudentIds?.[0]
-      : undefined;
   const visibleTabs =
     currentUser?.role === "parent"
-      ? parentLinkedStudentId
-        ? [
-            {
-              id: "my-student",
-              label: "Öğrenci Profili",
-              icon: Users,
-              path: `/student-profile/${parentLinkedStudentId}`,
-              roles: ["parent"] as const,
-            },
-          ]
-        : []
+      ? [
+          {
+            id: "my-students",
+            label: "Öğrencilerim",
+            icon: Users,
+            path: "/parent-students",
+            roles: ["parent"] as const,
+          },
+        ]
       : allTabs.filter((t) => hasPermission(t.roles));
   const handleNav = (path: string) => {
     navigate(path);

@@ -107,13 +107,23 @@ header('Access-Control-Allow-Origin: https://sizin-domain.com');
 | PUT | `/api/schools/{id}` | Medrese guncelle |
 | DELETE | `/api/schools/{id}` | Medrese sil |
 
-### Dersler
+### Kurslar
 | Method | Endpoint | Aciklama |
 |--------|----------|----------|
-| GET | `/api/lessons` | Tum dersleri listele |
-| POST | `/api/lessons` | Yeni ders ekle |
-| PUT | `/api/lessons/{id}` | Ders guncelle |
-| DELETE | `/api/lessons/{id}` | Ders sil |
+| GET | `/api/courses` | Tum kurslari listele |
+| POST | `/api/courses` | Yeni kurs ekle |
+| PUT | `/api/courses/{id}` | Kurs guncelle |
+| DELETE | `/api/courses/{id}` | Kurs sil |
+
+### Ders Planlari
+| Method | Endpoint | Aciklama |
+|--------|----------|----------|
+| GET | `/api/course-schedules` | Tum ders planlarini listele |
+| POST | `/api/course-schedules` | Yeni ders plani ekle |
+| PUT | `/api/course-schedules/{id}` | Ders plani guncelle |
+| DELETE | `/api/course-schedules/{id}` | Ders plani sil |
+
+> `/api/lessons` endpoint'i geriye uyumluluk icin hala calisir; icerik olarak `course_schedules` tablosundan ders planlari dondurur.
 
 ### Gruplar (Siniflar)
 | Method | Endpoint | Aciklama |
@@ -191,12 +201,14 @@ header('Access-Control-Allow-Origin: https://sizin-domain.com');
 | POST | `/api/lesson-logs` | Ders isleme kaydi ekle |
 | DELETE | `/api/lesson-logs/{id}` | Ders isleme kaydi sil |
 
-### Ogretmen-Ders Iliskisi
+### Ogretmen-Ders Plani Iliskisi
 | Method | Endpoint | Aciklama |
 |--------|----------|----------|
-| GET | `/api/teacher-lessons` | Ogretmen-ders atamalari |
-| POST | `/api/teacher-lessons` | Ogretmene ders ata |
-| DELETE | `/api/teacher-lessons/{id}` | Ders atamasini kaldir |
+| GET | `/api/teacher-lessons` | Ogretmen-ders plani atamalari |
+| POST | `/api/teacher-lessons` | Ogretmene ders plani ata |
+| DELETE | `/api/teacher-lessons/{id}` | Ders plani atamasini kaldir |
+
+> Artik ogretmen atamasi dogrudan `course_schedules` tablosu uzerinden yonetilir. Bu endpoint geriye uyumluluk icin korunmustur.
 
 ### Dashboard
 | Method | Endpoint | Aciklama |
@@ -233,7 +245,10 @@ curl -X GET http://localhost:8000/students \
 |-------|----------|
 | `users` | Kullanicilar (superadmin, admin, ogretmen, veli) |
 | `schools` | Medreseler |
-| `lessons` | Dersler |
+| `courses` | Kurslar (ders katalogu) |
+| `course_schedules` | Ders planlari (kurs + ogretmen + sinif + gun + saat) |
+| `class_room_courses` | Sinif-kurs coka-cok iliskisi |
+| `student_courses` | Ogrenci-kurs coka-cok iliskisi |
 | `class_rooms` | Gruplar (Kudus, Medine, Mekke, Aksa) |
 | `students` | Ogrenciler |
 | `attendance` | Yoklama kayitlari |
@@ -244,11 +259,10 @@ curl -X GET http://localhost:8000/students \
 | `surveys` | Anketler |
 | `survey_questions` | Anket sorulari |
 | `survey_answers` | Anket cevaplari |
-| `homework_templates` | Odev sablonlari |
+| `homework_templates` | Odev sablonlari (`course_id` ile kursa bagli) |
 | `homework_assignments` | Odev atamalari |
 | `curriculum_topics` | Mufredat konulari (Ilmihal, Adab, Tecvid) |
 | `lesson_logs` | Ders isleme kayitlari |
-| `teacher_lessons` | Ogretmen-ders atamalari |
 | `grid_column_permissions` | Grid kolon yetkileri |
 | `permission_matrix` | Yetki matrisi |
 

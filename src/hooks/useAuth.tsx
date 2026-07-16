@@ -9,6 +9,21 @@ import type { User, GridColumnPermission, UserRole } from "@/types";
 import { DEFAULT_GRID_COLUMN_PERMISSIONS } from "@/types";
 import { apiGet, apiPost, apiPut } from "./useApi";
 
+function normalizeUser(u: any): User {
+  return {
+    id: Number(u?.id ?? 0),
+    username: u?.username ?? "",
+    password: "",
+    role: (u?.role ?? "teacher") as UserRole,
+    fullName: u?.fullName ?? u?.full_name ?? "",
+    email: u?.email ?? "",
+    phone: u?.phone ?? "",
+    active: u?.active !== false && u?.active !== 0 && u?.active !== "0",
+    assignedLessons: u?.assignedLessons,
+    linkedStudentIds: u?.linkedStudentIds,
+  };
+}
+
 const SESSION_KEY = "ots_session";
 const SESSION_ACTIVITY_KEY = "ots_activity";
 const SESSION_DURATION = 30 * 60 * 1000;
@@ -167,7 +182,7 @@ interface AuthContextType {
   deleteUser: (id: number) => Promise<void>;
   changePassword: (userId: number, newPassword: string) => Promise<void>;
   refreshUsers: () => Promise<void>;
-  teacherLessons: { teacherId: number; lessonId: number }[];
+  teacherLessons: { id?: number; teacherId: number; lessonId: number }[];
   assignLessonToTeacher: (teacherId: number, lessonId: number) => Promise<void>;
   unassignLessonFromTeacher: (
     teacherId: number,
@@ -209,7 +224,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [teacherLessons, setTeacherLessons] = useState<
-    { teacherId: number; lessonId: number }[]
+    { id?: number; teacherId: number; lessonId: number }[]
   >([]);
   const [usersLoaded, setUsersLoaded] = useState(false);
   const [teacherLessonsLoaded, setTeacherLessonsLoaded] = useState(false);
@@ -230,10 +245,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setInitialized(true);
       return;
     }
-    apiGet<{ user: User }>("auth/me")
+    apiGet<{ user: any }>("auth/me")
       .then((data) => {
         if (data.user) {
-          setCurrentUser(data.user);
+          setCurrentUser(normalizeUser(data.user));
         }
       })
       .catch(() => {
@@ -263,8 +278,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUsers = useCallback(async () => {
     try {
-      const d = await apiGet<User[]>("users");
-      setUsers(d);
+      const d = await apiGet<any[]>("users");
+      setUsers(d.map(normalizeUser));
     } catch {
       /* */
     } finally {
@@ -276,7 +291,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const d = await apiGet<any[]>("teacher-lessons");
       setTeacherLessons(
-        d.map((t) => ({ teacherId: t.teacher_id, lessonId: t.lesson_id })),
+        d.map((t) => ({ id: t.id, teacherId: t.teacher_id, lessonId: t.lesson_id })),
       );
     } catch {
       setTeacherLessons([]);
@@ -290,13 +305,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(true);
       setError(null);
       try {
-        const data = await apiPost<{ token: string; user: User }>(
+        const data = await apiPost<{ token: string; user: any }>(
           "auth/login",
           { username, password },
         );
         if (data.token && data.user) {
           localStorage.setItem("ots_token", data.token);
-          setCurrentUser(data.user);
+          setCurrentUser(normalizeUser(data.user));
           updateLastActivity();
           return true;
         }
@@ -377,7 +392,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         (t) => t.teacherId === teacherId && t.lessonId === lessonId,
       );
       if (record) {
-        await apiDelete(`teacher-lessons/${(record as any).id || 0}`);
+        await apiDelete(`teacher-lessons/${record.id || 0}`);
         await refreshTeacherLessons();
       }
     },

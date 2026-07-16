@@ -43,21 +43,36 @@ export interface School {
   active?: boolean;
 }
 
-export interface Lesson {
+export interface Course {
   id: number;
   name: string;
-  startTime: string;
-  endTime: string;
-  dayOfWeek: string;
-  teacher?: string;
   description?: string;
   active: boolean;
+  createdAt?: string;
+}
+
+export interface CourseSchedule {
+  id: number;
+  courseId: number;
+  teacherId?: number | null;
+  classRoomId?: number | null;
+  dayOfWeek: string;
+  startTime: string;
+  endTime: string;
+  active: boolean;
+  createdAt?: string;
+  // joined / normalized convenience fields
+  name?: string;
+  description?: string;
+  teacher?: string;
+  teacherName?: string;
 }
 
 export interface Attendance {
   id: number;
   studentId: number;
-  lessonId: number;
+  classRoomId?: number | null;
+  lessonId?: number | null;
   date: string;
   status: 'present' | 'absent' | 'late' | 'excused';
   note?: string;
@@ -95,7 +110,7 @@ export interface HomeworkTemplate {
   title: string;
   content: string;
   details?: string;
-  lessonId?: number;
+  courseId?: number;
   type?: 'ezber' | 'okuma-kuran' | 'okuma-risale' | 'diger';
   active: boolean;
   createdAt?: string;
@@ -125,19 +140,63 @@ export interface MemorizationText {
   createdAt?: string;
 }
 
-export type MemorizationStatus = 'completed' | 'repeat' | 'not_completed';
+export type MemorizationStatus =
+  | "passed"
+  | "failed"
+  | "repeat_tecvid"
+  | "repeat_harf";
+
+export interface MemorizationCriteria {
+  id: number;
+  code: string;
+  label: string;
+  maxScore: number;
+  weight: number;
+  active: boolean;
+  sortOrder: number;
+  createdAt?: string;
+}
+
+export type MemorizationMode = "simple" | "scoring" | "detailed";
 
 export interface MemorizationTracking {
   id: number;
   studentId: number;
   textId: number;
   status: MemorizationStatus;
+  scores?: Record<string, number>;
   teacherNote?: string;
   checkedBy?: number;
   checkedByName?: string;
   checkedAt?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface MemorizationSummaryItem {
+  id: number;
+  studentId: number;
+  textId: number;
+  textTitle: string;
+  status: MemorizationStatus;
+  scores?: Record<string, number>;
+  teacherNote?: string;
+  checkedAt?: string;
+  updatedAt?: string;
+  checkedByName?: string;
+}
+
+export interface MemorizationSummary {
+  studentId: number;
+  total: number;
+  passed: number;
+  failed: number;
+  repeatTecvid: number;
+  repeatHarf: number;
+  successRate: number;
+  recent: MemorizationSummaryItem[];
+  needsRepeat: MemorizationSummaryItem[];
+  statusCounts: Record<MemorizationStatus, number>;
 }
 
 export interface Report {
@@ -178,7 +237,7 @@ export interface ClassRoom {
 
 export interface CurriculumTopic {
   id: number;
-  category: 'ilmihal' | 'adab' | 'tecvid';
+  category: 'ilmihal' | 'adab' | 'tecvid' | 'diger';
   title: string;
   subTopics: string[];
   active: boolean;

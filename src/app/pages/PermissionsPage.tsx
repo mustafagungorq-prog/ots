@@ -102,7 +102,11 @@ import { Switch } from "@/components/ui/switch";
 import { useStudentData } from "@/hooks/useStudentData";
 import { useAuth } from "@/hooks/useAuth";
 import { Loading } from "@/components/Loading";
-import { apiDelete, apiGet, apiPost } from "@/hooks/useApi";
+import { apiDelete, apiGet, apiPost, apiPut } from "@/hooks/useApi";
+import {
+  validateUserForm,
+  type UserFormErrors,
+} from "@/lib/userValidation";
 import type {
   Student,
   School,
@@ -116,6 +120,8 @@ import type {
   QuestionType,
   HomeworkTemplate,
   ClassRoom,
+  MemorizationCriteria,
+  MemorizationMode,
 } from "@/types";
 import { PERMISSIONS } from "@/types";
 import type { PermissionMatrixEntry } from "@/hooks/useAuth";
@@ -192,7 +198,7 @@ export function PermissionsPage() {
     refreshTeacherLessons,
   } = useAuth();
   const [activeTab, setActiveTab] = useState<
-    "users" | "matrix" | "teacherLinks" | "gridColumns"
+    "users" | "matrix" | "teacherLinks" | "gridColumns" | "settings"
   >("users");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
@@ -201,12 +207,44 @@ export function PermissionsPage() {
   const [selectedGrid, setSelectedGrid] = useState("students");
   const [selectedParentStudentId, setSelectedParentStudentId] =
     useState<string>("");
+  const [subTopicRequired, setSubTopicRequired] = useState(false);
+  const [savingSubTopicSetting, setSavingSubTopicSetting] = useState(false);
+  const [memorizationMode, setMemorizationMode] = useState<MemorizationMode>("simple");
+  const [savingMemorizationMode, setSavingMemorizationMode] = useState(false);
+  const [criteriaDialogOpen, setCriteriaDialogOpen] = useState(false);
+  const [editingCriteria, setEditingCriteria] = useState<MemorizationCriteria | null>(null);
+  const [criteriaForm, setCriteriaForm] = useState<Partial<MemorizationCriteria>>({
+    maxScore: 100,
+    weight: 1,
+    active: true,
+    sortOrder: 0,
+  });
+  const [formErrors, setFormErrors] = useState<UserFormErrors>({});
+  const formValid = useMemo(() => {
+    const { valid } = validateUserForm(
+      form,
+      selectedParentStudentId,
+      users,
+      editing?.id,
+    );
+    return valid;
+  }, [form, selectedParentStudentId, users, editing]);
 
   useEffect(() => {
     data.loadStudents();
     data.loadLessons();
     refreshUsers();
     refreshTeacherLessons();
+    apiGet<{ value?: string }>("system-settings/sub_topic_required")
+      .then((d) => setSubTopicRequired(String(d.value).toLowerCase() === "true"))
+      .catch(() => setSubTopicRequired(false));
+    apiGet<{ value?: string }>("system-settings/memorization_mode")
+      .then((d) => {
+        const mode = d.value as MemorizationMode;
+        setMemorizationMode(["simple", "scoring", "detailed"].includes(mode) ? mode : "simple");
+      })
+      .catch(() => setMemorizationMode("simple"));
+    data.loadMemorizationCriteria();
   }, []);
   /*
   if (data.loadingStudents || data.loadingLessons || !usersLoaded || !teacherLessonsLoaded) {
@@ -242,9 +280,17 @@ export function PermissionsPage() {
   };
 
   const handleSubmit = async () => {
-    if (!form.username || !form.fullName || !form.role) return;
-    if (!editing && !form.password) return;
-    if (form.role === "parent" && !selectedParentStudentId) return;
+    const { valid, errors } = validateUserForm(
+      form,
+      selectedParentStudentId,
+      users,
+      editing?.id,
+    );
+    if (!valid) {
+      setFormErrors(errors);
+      return;
+    }
+    setFormErrors({});
 
     if (editing) {
       await updateUser(editing.id, form);
@@ -276,6 +322,7 @@ export function PermissionsPage() {
     setEditing(null);
     setForm({ active: true, role: "teacher" });
     setSelectedParentStudentId("");
+    setFormErrors({});
     setOpen(true);
   };
   const openEdit = async (u: User) => {
@@ -283,6 +330,7 @@ export function PermissionsPage() {
     setForm({ ...u, password: "" });
     if (u.role === "parent") await loadParentLinkedStudent(u.id);
     else setSelectedParentStudentId("");
+    setFormErrors({});
     setOpen(true);
   };
   const gridColumns = getColumnsForGrid(selectedGrid);
@@ -347,6 +395,12 @@ export function PermissionsPage() {
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "gridColumns" ? "border-emerald-600 text-emerald-700" : "border-transparent text-gray-500"}`}
         >
           Grid Kolon Yetkileri
+        </button>
+        <button
+          onClick={() => setActiveTab("settings")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "settings" ? "border-emerald-600 text-emerald-700" : "border-transparent text-gray-500"}`}
+        >
+          Sistem Ayarları
         </button>
       </div>
 
@@ -696,6 +750,169 @@ export function PermissionsPage() {
         </Card>
       )}
 
+      {activeTab === "settings" && (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Sistem Ayarları</CardTitle>
+              <CardDescription>
+                Uygulama genelindeki davranışları yapılandırın
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between p-3 border rounded-lg">
+                <div>
+                  <p className="text-sm font-medium">Alt Konu Zorunlu</p>
+                  <p className="text-xs text-gray-500">
+                    Aktif olursa ders işleme ekranında alt konu seçimi zorunlu olur.
+                  </p>
+                </div>
+                <Switch
+                  checked={subTopicRequired}
+                  disabled={savingSubTopicSetting}
+                  onCheckedChange={async (v) => {
+                    setSavingSubTopicSetting(true);
+                    try {
+                      await apiPut("system-settings/sub_topic_required", {
+                        value: String(v),
+                      });
+                      setSubTopicRequired(v);
+                    } catch (err: any) {
+                      alert(err?.message || "Ayar kaydedilemedi");
+                    } finally {
+                      setSavingSubTopicSetting(false);
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="p-3 border rounded-lg space-y-3">
+                <div>
+                  <p className="text-sm font-medium">Ezber Modu</p>
+                  <p className="text-xs text-gray-500">
+                    Ezber takip ekranının çalışma modunu seçin.
+                  </p>
+                </div>
+                <Select
+                  value={memorizationMode}
+                  disabled={savingMemorizationMode}
+                  onValueChange={async (v) => {
+                    const mode = v as MemorizationMode;
+                    setSavingMemorizationMode(true);
+                    try {
+                      await apiPut("system-settings/memorization_mode", { value: mode });
+                      setMemorizationMode(mode);
+                    } catch (err: any) {
+                      alert(err?.message || "Ayar kaydedilemedi");
+                    } finally {
+                      setSavingMemorizationMode(false);
+                    }
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Ezber modu seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="simple">Basit</SelectItem>
+                    <SelectItem value="scoring">Puanlamalı</SelectItem>
+                    <SelectItem value="detailed">Ayrıntılı</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+
+          {(memorizationMode === "scoring" || memorizationMode === "detailed") && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Ezber Değerlendirme Kriterleri</CardTitle>
+                <CardDescription>
+                  Puanlamalı modda kullanılan kriterleri yönetin.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex justify-end">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditingCriteria(null);
+                      setCriteriaForm({ maxScore: 100, weight: 1, active: true, sortOrder: 0 });
+                      setCriteriaDialogOpen(true);
+                    }}
+                  >
+                    <Plus size={16} className="mr-1" />
+                    Kriter Ekle
+                  </Button>
+                </div>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs">Kod</TableHead>
+                        <TableHead className="text-xs">Etiket</TableHead>
+                        <TableHead className="text-xs">Maks. Puan</TableHead>
+                        <TableHead className="text-xs">Ağırlık</TableHead>
+                        <TableHead className="text-xs">Sıra</TableHead>
+                        <TableHead className="text-xs">Aktif</TableHead>
+                        <TableHead className="text-xs text-right">İşlem</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {data.memorizationCriteria.map((c) => (
+                        <TableRow key={c.id}>
+                          <TableCell className="text-xs">{c.code}</TableCell>
+                          <TableCell className="text-xs font-medium">{c.label}</TableCell>
+                          <TableCell className="text-xs">{c.maxScore}</TableCell>
+                          <TableCell className="text-xs">{c.weight}</TableCell>
+                          <TableCell className="text-xs">{c.sortOrder}</TableCell>
+                          <TableCell className="text-xs">
+                            {c.active ? "Evet" : "Hayır"}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingCriteria(c);
+                                  setCriteriaForm({ ...c });
+                                  setCriteriaDialogOpen(true);
+                                }}
+                              >
+                                <Pencil size={14} />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="text-red-600 border-red-300"
+                                onClick={() => {
+                                  if (confirm("Kriter silinsin mi?")) {
+                                    data.deleteMemorizationCriteria(c.id);
+                                  }
+                                }}
+                              >
+                                <Trash2 size={14} />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {data.memorizationCriteria.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center py-6 text-gray-500 text-xs">
+                            Henüz kriter tanımlanmamış.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -709,19 +926,39 @@ export function PermissionsPage() {
                 <Label className="text-xs">Kullanıcı Adı *</Label>
                 <Input
                   value={form.username || ""}
-                  onChange={(e) =>
-                    setForm({ ...form, username: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setForm({ ...form, username: e.target.value });
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      username: undefined,
+                    }));
+                  }}
+                  className={formErrors.username ? "border-red-500" : ""}
                 />
+                {formErrors.username && (
+                  <p className="text-xs text-red-600">
+                    {formErrors.username}
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Ad Soyad *</Label>
                 <Input
                   value={form.fullName || ""}
-                  onChange={(e) =>
-                    setForm({ ...form, fullName: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setForm({ ...form, fullName: e.target.value });
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      fullName: undefined,
+                    }));
+                  }}
+                  className={formErrors.fullName ? "border-red-500" : ""}
                 />
+                {formErrors.fullName && (
+                  <p className="text-xs text-red-600">
+                    {formErrors.fullName}
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-1">
@@ -731,7 +968,14 @@ export function PermissionsPage() {
                 onValueChange={(v) => {
                   const nextRole = v as UserRole;
                   setForm({ ...form, role: nextRole });
-                  if (nextRole !== "parent") setSelectedParentStudentId("");
+                  setFormErrors((prev) => ({ ...prev, role: undefined }));
+                  if (nextRole !== "parent") {
+                    setSelectedParentStudentId("");
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      parentStudentId: undefined,
+                    }));
+                  }
                 }}
               >
                 <SelectTrigger>
@@ -745,13 +989,22 @@ export function PermissionsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {formErrors.role && (
+                <p className="text-xs text-red-600">{formErrors.role}</p>
+              )}
             </div>
             {form.role === "parent" && (
               <div className="space-y-1">
                 <Label className="text-xs">Öğrenciyi Eşleştir *</Label>
                 <Select
                   value={selectedParentStudentId}
-                  onValueChange={setSelectedParentStudentId}
+                  onValueChange={(v) => {
+                    setSelectedParentStudentId(v);
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      parentStudentId: undefined,
+                    }));
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Öğrenci seçin" />
@@ -764,6 +1017,11 @@ export function PermissionsPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {formErrors.parentStudentId && (
+                  <p className="text-xs text-red-600">
+                    {formErrors.parentStudentId}
+                  </p>
+                )}
               </div>
             )}
             <div className="space-y-1">
@@ -774,9 +1032,14 @@ export function PermissionsPage() {
                 <Input
                   type={showPw ? "text" : "password"}
                   value={form.password || ""}
-                  onChange={(e) =>
-                    setForm({ ...form, password: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setForm({ ...form, password: e.target.value });
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      password: undefined,
+                    }));
+                  }}
+                  className={formErrors.password ? "border-red-500" : ""}
                 />
                 <button
                   type="button"
@@ -786,14 +1049,24 @@ export function PermissionsPage() {
                   {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              {formErrors.password && (
+                <p className="text-xs text-red-600">{formErrors.password}</p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label className="text-xs">E-posta</Label>
                 <Input
                   value={form.email || ""}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  onChange={(e) => {
+                    setForm({ ...form, email: e.target.value });
+                    setFormErrors((prev) => ({ ...prev, email: undefined }));
+                  }}
+                  className={formErrors.email ? "border-red-500" : ""}
                 />
+                {formErrors.email && (
+                  <p className="text-xs text-red-600">{formErrors.email}</p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Telefon</Label>
@@ -810,8 +1083,98 @@ export function PermissionsPage() {
               />
               <Label className="text-xs">Aktif</Label>
             </div>
-            <Button onClick={handleSubmit} className="w-full">
+            <Button
+              onClick={handleSubmit}
+              className="w-full"
+              disabled={!formValid}
+            >
               {editing ? "Güncelle" : "Ekle"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={criteriaDialogOpen} onOpenChange={setCriteriaDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {editingCriteria ? "Kriter Düzenle" : "Yeni Kriter"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Kod *</Label>
+              <Input
+                value={criteriaForm.code || ""}
+                onChange={(e) => setCriteriaForm({ ...criteriaForm, code: e.target.value })}
+                placeholder="tecvid"
+                disabled={!!editingCriteria}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Etiket *</Label>
+              <Input
+                value={criteriaForm.label || ""}
+                onChange={(e) => setCriteriaForm({ ...criteriaForm, label: e.target.value })}
+                placeholder="Tecvid"
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Maks. Puan</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={criteriaForm.maxScore ?? 100}
+                  onChange={(e) => setCriteriaForm({ ...criteriaForm, maxScore: Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Ağırlık</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={criteriaForm.weight ?? 1}
+                  onChange={(e) => setCriteriaForm({ ...criteriaForm, weight: Number(e.target.value) })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Sıra</Label>
+                <Input
+                  type="number"
+                  value={criteriaForm.sortOrder ?? 0}
+                  onChange={(e) => setCriteriaForm({ ...criteriaForm, sortOrder: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={criteriaForm.active ?? true}
+                onCheckedChange={(v) => setCriteriaForm({ ...criteriaForm, active: v })}
+              />
+              <Label className="text-xs">Aktif</Label>
+            </div>
+            <Button
+              className="w-full"
+              disabled={!criteriaForm.code?.trim() || !criteriaForm.label?.trim()}
+              onClick={() => {
+                const payload = {
+                  code: criteriaForm.code!.trim(),
+                  label: criteriaForm.label!.trim(),
+                  maxScore: criteriaForm.maxScore ?? 100,
+                  weight: criteriaForm.weight ?? 1,
+                  sortOrder: criteriaForm.sortOrder ?? 0,
+                  active: criteriaForm.active ?? true,
+                };
+                if (editingCriteria) {
+                  data.updateMemorizationCriteria(editingCriteria.id, payload);
+                } else {
+                  data.addMemorizationCriteria(payload);
+                }
+                setCriteriaDialogOpen(false);
+              }}
+            >
+              {editingCriteria ? "Güncelle" : "Ekle"}
             </Button>
           </div>
         </DialogContent>

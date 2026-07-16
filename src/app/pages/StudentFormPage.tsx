@@ -550,7 +550,7 @@ export function StudentFormPage() {
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Dersler</Label>
+              <Label className="text-xs">Kurslar</Label>
               <div className="flex flex-wrap gap-2">
                 {data.lessons.map((l) => (
                   <Button

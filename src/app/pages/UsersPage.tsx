@@ -52,6 +52,8 @@ import {
   AlertTriangle,
   Printer,
   Info,
+  ChevronsUpDown,
+  Check,
 } from "lucide-react";
 import {
   AreaChart,
@@ -89,6 +91,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
@@ -102,7 +117,11 @@ import { Switch } from "@/components/ui/switch";
 import { useStudentData } from "@/hooks/useStudentData";
 import { useAuth } from "@/hooks/useAuth";
 import { Loading } from "@/components/Loading";
-import { apiPost } from "@/hooks/useApi";
+import { apiPost, apiDelete } from "@/hooks/useApi";
+import {
+  validateUserForm,
+  type UserFormErrors,
+} from "@/lib/userValidation";
 import type {
   Student,
   School,
@@ -176,23 +195,37 @@ export function UsersPage() {
     changePassword,
     currentUser,
     addUser,
+    updateUser,
     usersLoaded,
     refreshUsers,
+    canManageUser,
   } = useAuth();
   const [open, setOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [newPass, setNewPass] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
+  const [userFormOpen, setUserFormOpen] = useState(false);
   const [showPw, setShowPw] = useState(false);
-  const [createForm, setCreateForm] = useState<Partial<User>>({
+  const [formErrors, setFormErrors] = useState<UserFormErrors>({});
+  const [userForm, setUserForm] = useState<Partial<User>>({
     active: true,
     role: "teacher",
   });
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [selectedParentStudentId, setSelectedParentStudentId] =
     useState<string>("");
+  const userFormValid = useMemo(() => {
+    const { valid } = validateUserForm(
+      userForm,
+      selectedParentStudentId,
+      users,
+      editingUser?.id,
+    );
+    return valid;
+  }, [userForm, selectedParentStudentId, users, editingUser]);
 
   useEffect(() => {
     data.loadStudents();
+    data.loadParentStudentLinks();
     refreshUsers();
   }, []);
   /*
@@ -209,32 +242,70 @@ export function UsersPage() {
     setSelectedUser(null);
     setNewPass("");
   };
-  const handleCreateUser = async () => {
-    if (
-      !createForm.username ||
-      !createForm.password ||
-      !createForm.fullName ||
-      !createForm.role
-    )
+  const handleSaveUser = async () => {
+    const { valid, errors } = validateUserForm(
+      userForm,
+      selectedParentStudentId,
+      users,
+      editingUser?.id,
+    );
+    if (!valid) {
+      setFormErrors(errors);
       return;
-    if (createForm.role === "parent" && !selectedParentStudentId) return;
+    }
+    setFormErrors({});
 
-    const createdUserId = await addUser(createForm as Omit<User, "id">);
-    if (
-      createForm.role === "parent" &&
-      createdUserId &&
-      selectedParentStudentId
-    ) {
-      await apiPost("parent-student-links", {
-        parentUserId: createdUserId,
-        studentId: Number(selectedParentStudentId),
-      });
+    if (editingUser) {
+      const payload = { ...userForm };
+      if (!payload.password) {
+        delete payload.password;
+      }
+      await updateUser(editingUser.id, payload);
+
+      const existingStudentIds = data.parentStudentLinks
+        .filter((l) => l.parentUserId === editingUser.id)
+        .map((l) => l.studentId);
+
+      if (
+        userForm.role === "parent" &&
+        selectedParentStudentId
+      ) {
+        for (const sid of existingStudentIds) {
+          await apiDelete(
+            `parent-student-links?parentUserId=${editingUser.id}&studentId=${sid}`,
+          );
+        }
+        await apiPost("parent-student-links", {
+          parentUserId: editingUser.id,
+          studentId: Number(selectedParentStudentId),
+        });
+      } else if (userForm.role !== "parent") {
+        for (const sid of existingStudentIds) {
+          await apiDelete(
+            `parent-student-links?parentUserId=${editingUser.id}&studentId=${sid}`,
+          );
+        }
+      }
+    } else {
+      const createdUserId = await addUser(userForm as Omit<User, "id">);
+      if (
+        userForm.role === "parent" &&
+        createdUserId &&
+        selectedParentStudentId
+      ) {
+        await apiPost("parent-student-links", {
+          parentUserId: createdUserId,
+          studentId: Number(selectedParentStudentId),
+        });
+      }
     }
 
-    setCreateOpen(false);
+    await data.loadParentStudentLinks(true);
+    setUserFormOpen(false);
     setShowPw(false);
-    setCreateForm({ active: true, role: "teacher" });
+    setUserForm({ active: true, role: "teacher" });
     setSelectedParentStudentId("");
+    setEditingUser(null);
   };
   return (
     <div className="space-y-4">
@@ -242,9 +313,19 @@ export function UsersPage() {
         <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
           Kullanıcılar
         </h2>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus size={18} className="mr-1" /> Kullanıcı Ekle
-        </Button>
+        {canManageUser && (
+          <Button
+            onClick={() => {
+              setEditingUser(null);
+              setUserForm({ active: true, role: "teacher" });
+              setSelectedParentStudentId("");
+              setFormErrors({});
+              setUserFormOpen(true);
+            }}
+          >
+            <Plus size={18} className="mr-1" /> Kullanıcı Ekle
+          </Button>
+        )}
       </div>
       <Card>
         <CardContent className="p-0 overflow-x-auto">
@@ -293,16 +374,48 @@ export function UsersPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setSelectedUser(u);
-                        setOpen(true);
-                      }}
-                    >
-                      <Shield size={14} className="mr-1" /> Şifre Değiştir
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedUser(u);
+                          setOpen(true);
+                        }}
+                      >
+                        <Shield size={14} className="mr-1" /> Şifre Değiştir
+                      </Button>
+                      {canManageUser && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setEditingUser(u);
+                            setUserForm({
+                              username: u.username,
+                              fullName: u.fullName,
+                              email: u.email,
+                              phone: u.phone,
+                              role: u.role,
+                              active: u.active,
+                            });
+                            setSelectedParentStudentId(
+                              u.role === "parent"
+                                ? String(
+                                    data.parentStudentLinks.find(
+                                      (l) => l.parentUserId === u.id,
+                                    )?.studentId ?? "",
+                                  )
+                                : "",
+                            );
+                            setFormErrors({});
+                            setUserFormOpen(true);
+                          }}
+                        >
+                          <Pencil size={14} className="mr-1" /> Düzenle
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -333,40 +446,69 @@ export function UsersPage() {
           </div>
         </DialogContent>
       </Dialog>
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={userFormOpen} onOpenChange={setUserFormOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Yeni Kullanıcı</DialogTitle>
+            <DialogTitle>
+              {editingUser ? "Kullanıcı Düzenle" : "Yeni Kullanıcı"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 pt-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label className="text-xs">Kullanıcı Adı *</Label>
                 <Input
-                  value={createForm.username || ""}
-                  onChange={(e) =>
-                    setCreateForm({ ...createForm, username: e.target.value })
-                  }
+                  value={userForm.username || ""}
+                  onChange={(e) => {
+                    setUserForm({ ...userForm, username: e.target.value });
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      username: undefined,
+                    }));
+                  }}
+                  className={formErrors.username ? "border-red-500" : ""}
                 />
+                {formErrors.username && (
+                  <p className="text-xs text-red-600">
+                    {formErrors.username}
+                  </p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Ad Soyad *</Label>
                 <Input
-                  value={createForm.fullName || ""}
-                  onChange={(e) =>
-                    setCreateForm({ ...createForm, fullName: e.target.value })
-                  }
+                  value={userForm.fullName || ""}
+                  onChange={(e) => {
+                    setUserForm({ ...userForm, fullName: e.target.value });
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      fullName: undefined,
+                    }));
+                  }}
+                  className={formErrors.fullName ? "border-red-500" : ""}
                 />
+                {formErrors.fullName && (
+                  <p className="text-xs text-red-600">
+                    {formErrors.fullName}
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Rol *</Label>
               <Select
-                value={createForm.role || "teacher"}
+                value={userForm.role || "teacher"}
                 onValueChange={(v) => {
                   const nextRole = v as UserRole;
-                  setCreateForm({ ...createForm, role: nextRole });
-                  if (nextRole !== "parent") setSelectedParentStudentId("");
+                  setUserForm({ ...userForm, role: nextRole });
+                  setFormErrors((prev) => ({ ...prev, role: undefined }));
+                  if (nextRole !== "parent") {
+                    setSelectedParentStudentId("");
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      parentStudentId: undefined,
+                    }));
+                  }
                 }}
               >
                 <SelectTrigger>
@@ -380,36 +522,94 @@ export function UsersPage() {
                   ))}
                 </SelectContent>
               </Select>
+              {formErrors.role && (
+                <p className="text-xs text-red-600">{formErrors.role}</p>
+              )}
             </div>
-            {createForm.role === "parent" && (
+            {userForm.role === "parent" && (
               <div className="space-y-1">
                 <Label className="text-xs">Öğrenciyi Eşleştir *</Label>
-                <Select
-                  value={selectedParentStudentId}
-                  onValueChange={setSelectedParentStudentId}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Öğrenci seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {data.students.map((s) => (
-                      <SelectItem key={s.id} value={String(s.id)}>
-                        {s.firstName} {s.lastName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      className="w-full justify-between h-9 text-sm font-normal"
+                    >
+                      {selectedParentStudentId
+                        ? (() => {
+                            const s = data.students.find(
+                              (x) =>
+                                String(x.id) === selectedParentStudentId,
+                            );
+                            return s
+                              ? `${s.firstName} ${s.lastName}`
+                              : "Öğrenci seçin";
+                          })()
+                        : "Öğrenci seçin"}
+                      <ChevronsUpDown
+                        size={14}
+                        className="ml-2 opacity-50 shrink-0"
+                      />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    className="p-0"
+                    style={{ width: "var(--radix-popover-trigger-width)" }}
+                    align="start"
+                  >
+                    <Command>
+                      <CommandInput placeholder="Öğrenci ara..." />
+                      <CommandList>
+                        <CommandEmpty>Öğrenci bulunamadı</CommandEmpty>
+                        <CommandGroup>
+                          {data.students.map((s) => (
+                            <CommandItem
+                              key={s.id}
+                              value={`${s.firstName} ${s.lastName} ${s.grade}`}
+                              onSelect={() => {
+                                setSelectedParentStudentId(String(s.id));
+                                setFormErrors((prev) => ({
+                                  ...prev,
+                                  parentStudentId: undefined,
+                                }));
+                              }}
+                            >
+                              <Check
+                                size={14}
+                                className={`mr-2 shrink-0 ${String(s.id) === selectedParentStudentId ? "opacity-100" : "opacity-0"}`}
+                              />
+                              {s.firstName} {s.lastName} ({s.grade})
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {formErrors.parentStudentId && (
+                  <p className="text-xs text-red-600">
+                    {formErrors.parentStudentId}
+                  </p>
+                )}
               </div>
             )}
             <div className="space-y-1">
-              <Label className="text-xs">Şifre *</Label>
+              <Label className="text-xs">
+                Şifre {editingUser ? "(değiştirmek için girin)" : "*"}
+              </Label>
               <div className="relative">
                 <Input
                   type={showPw ? "text" : "password"}
-                  value={createForm.password || ""}
-                  onChange={(e) =>
-                    setCreateForm({ ...createForm, password: e.target.value })
-                  }
+                  value={userForm.password || ""}
+                  onChange={(e) => {
+                    setUserForm({ ...userForm, password: e.target.value });
+                    setFormErrors((prev) => ({
+                      ...prev,
+                      password: undefined,
+                    }));
+                  }}
+                  className={formErrors.password ? "border-red-500" : ""}
                 />
                 <button
                   type="button"
@@ -419,37 +619,49 @@ export function UsersPage() {
                   {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              {formErrors.password && (
+                <p className="text-xs text-red-600">{formErrors.password}</p>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label className="text-xs">E-posta</Label>
                 <Input
-                  value={createForm.email || ""}
-                  onChange={(e) =>
-                    setCreateForm({ ...createForm, email: e.target.value })
-                  }
+                  value={userForm.email || ""}
+                  onChange={(e) => {
+                    setUserForm({ ...userForm, email: e.target.value });
+                    setFormErrors((prev) => ({ ...prev, email: undefined }));
+                  }}
+                  className={formErrors.email ? "border-red-500" : ""}
                 />
+                {formErrors.email && (
+                  <p className="text-xs text-red-600">{formErrors.email}</p>
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Telefon</Label>
                 <Input
-                  value={createForm.phone || ""}
+                  value={userForm.phone || ""}
                   onChange={(e) =>
-                    setCreateForm({ ...createForm, phone: e.target.value })
+                    setUserForm({ ...userForm, phone: e.target.value })
                   }
                 />
               </div>
             </div>
             <div className="flex items-center gap-2">
               <Switch
-                checked={createForm.active ?? true}
+                checked={userForm.active ?? true}
                 onCheckedChange={(v) =>
-                  setCreateForm({ ...createForm, active: v })
+                  setUserForm({ ...userForm, active: v })
                 }
               />
               <Label className="text-xs">Aktif</Label>
             </div>
-            <Button onClick={handleCreateUser} className="w-full">
+            <Button
+              onClick={handleSaveUser}
+              className="w-full"
+              disabled={!userFormValid}
+            >
               Ekle
             </Button>
           </div>

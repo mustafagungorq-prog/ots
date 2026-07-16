@@ -180,7 +180,6 @@ export function StudentPopup({
   const [tab, setTab] = useState<"attendance" | "progress">("attendance");
   const today = new Date().toISOString().split("T")[0];
   const [attDate, setAttDate] = useState(today);
-  const [attLesson, setAttLesson] = useState("");
   const [attNote, setAttNote] = useState("");
   const [progDate, setProgDate] = useState(today);
   const [kuranPages, setKuranPages] = useState("");
@@ -191,7 +190,7 @@ export function StudentPopup({
   const [progNotes, setProgNotes] = useState("");
 
   useEffect(() => {
-    data.loadLessons();
+    data.loadClassRooms();
     data.loadAttendance();
     data.loadProgress();
     data.loadSchools();
@@ -201,9 +200,6 @@ export function StudentPopup({
     return <Loading />;
   }*/
 
-  const studentLessons = data.lessons.filter((l) =>
-    student.lessons.includes(l.id),
-  );
   const statusC: Record<string, string> = {
     present: "bg-green-500",
     absent: "bg-red-500",
@@ -221,29 +217,22 @@ export function StudentPopup({
     .slice(-1)[0];
 
   const markAtt = (status: Attendance["status"]) => {
-    if (!attLesson) return;
     const ex = data.attendance.find(
-      (a) =>
-        a.studentId === student.id &&
-        a.date === attDate &&
-        a.lessonId === Number(attLesson),
+      (a) => a.studentId === student.id && a.date === attDate,
     );
     if (ex) data.updateAttendanceStatus(ex.id, status);
     else
       data.addAttendance({
         studentId: student.id,
+        classRoomId: student.groupId ?? null,
         date: attDate,
         status,
-        lessonId: Number(attLesson),
         note: attNote || undefined,
       });
   };
-  const getAttStatus = (lessonId: number, date: string) =>
+  const getAttStatus = (date: string) =>
     data.attendance.find(
-      (a) =>
-        a.studentId === student.id &&
-        a.date === date &&
-        a.lessonId === lessonId,
+      (a) => a.studentId === student.id && a.date === date,
     )?.status || null;
   const saveProg = () => {
     data.addProgress({
@@ -319,21 +308,6 @@ export function StudentPopup({
                     className="w-40"
                   />
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Ders</Label>
-                  <Select value={attLesson} onValueChange={setAttLesson}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Ders seçin" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {studentLessons.map((l) => (
-                        <SelectItem key={l.id} value={String(l.id)}>
-                          {l.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
                 <div className="space-y-1 flex-1 min-w-[200px]">
                   <Label className="text-xs">Not</Label>
                   <Input
@@ -343,26 +317,24 @@ export function StudentPopup({
                   />
                 </div>
               </div>
-              {attLesson && (
-                <div className="flex gap-2 flex-wrap">
-                  {(["present", "absent", "late", "excused"] as const).map(
-                    (s) => {
-                      const cs = getAttStatus(Number(attLesson), attDate);
-                      return (
-                        <Button
-                          key={s}
-                          size="sm"
-                          variant={cs === s ? "default" : "outline"}
-                          className={cs === s ? statusC[s] : ""}
-                          onClick={() => markAtt(s)}
-                        >
-                          {statusL[s]}
-                        </Button>
-                      );
-                    },
-                  )}
-                </div>
-              )}
+              <div className="flex gap-2 flex-wrap">
+                {(["present", "absent", "late", "excused"] as const).map(
+                  (s) => {
+                    const cs = getAttStatus(attDate);
+                    return (
+                      <Button
+                        key={s}
+                        size="sm"
+                        variant={cs === s ? "default" : "outline"}
+                        className={cs === s ? statusC[s] : ""}
+                        onClick={() => markAtt(s)}
+                      >
+                        {statusL[s]}
+                      </Button>
+                    );
+                  },
+                )}
+              </div>
               <div className="mt-4">
                 <h4 className="font-medium text-sm mb-2">Yoklama Geçmişi</h4>
                 <div className="border rounded-lg overflow-hidden">
@@ -370,7 +342,7 @@ export function StudentPopup({
                     <TableHeader>
                       <TableRow>
                         <TableHead className="text-xs">Tarih</TableHead>
-                        <TableHead className="text-xs">Ders</TableHead>
+                        <TableHead className="text-xs">Sınıf</TableHead>
                         <TableHead className="text-xs">Durum</TableHead>
                         <TableHead className="text-xs">Not</TableHead>
                       </TableRow>
@@ -382,8 +354,8 @@ export function StudentPopup({
                         .reverse()
                         .slice(0, 10)
                         .map((a) => {
-                          const l = data.lessons.find(
-                            (x) => x.id === a.lessonId,
+                          const cr = data.classRooms.find(
+                            (x) => x.id === a.classRoomId,
                           );
                           return (
                             <TableRow key={a.id}>
@@ -391,7 +363,7 @@ export function StudentPopup({
                                 {a.date}
                               </TableCell>
                               <TableCell className="text-xs">
-                                {l?.name}
+                                {cr?.name || "-"}
                               </TableCell>
                               <TableCell>
                                 <Badge
@@ -748,11 +720,10 @@ export function StudentsPage() {
                 return (
                   <TableRow
                     key={s.id}
+                    onClick={() => navigate(`/student-profile/${s.id}`)}
                     onDoubleClick={() => handleRowDoubleClick(s)}
                     className={`cursor-pointer hover:bg-blue-50 ${selectedStudents.includes(s.id) ? "bg-emerald-50" : ""}`}
-                    title={
-                      canEdit ? "Çift tıklayın: Güncelle" : "Çift tıklayın"
-                    }
+                    title="Tıklayın: Profil • Çift tıklayın: Güncelle"
                   >
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <input

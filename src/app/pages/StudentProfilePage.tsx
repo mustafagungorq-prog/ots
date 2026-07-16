@@ -64,6 +64,9 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import {
@@ -102,7 +105,7 @@ import { Switch } from "@/components/ui/switch";
 import { useStudentData } from "@/hooks/useStudentData";
 import { useAuth } from "@/hooks/useAuth";
 import { Loading } from "@/components/Loading";
-import { sendMailViaPhp } from "@/hooks/useApi";
+import { sendMailViaPhp, apiGet } from "@/hooks/useApi";
 import type {
   Student,
   School,
@@ -116,6 +119,7 @@ import type {
   QuestionType,
   HomeworkTemplate,
   ClassRoom,
+  MemorizationMode,
 } from "@/types";
 import { PERMISSIONS } from "@/types";
 import type { PermissionMatrixEntry } from "@/hooks/useAuth";
@@ -171,17 +175,18 @@ function getMonthName(key: string) {
 // ====== STUDENT PROFILE PAGE ======
 export function StudentProfilePage() {
   const data = useStudentData();
-  const { currentUser } = useAuth();
+  const { currentUser, users } = useAuth();
   const navigate = useNavigate();
   const { id } = useParams();
   const profileId = Number(id);
   const isParent = currentUser?.role === "parent";
   const canManageReports = !isParent;
-  const parentStudentId = isParent
-    ? currentUser?.linkedStudentIds?.[0]
-    : undefined;
+  const allowedStudentIds = useMemo(() => {
+    if (!isParent || !currentUser) return [];
+    return data.getParentStudents(currentUser.id);
+  }, [isParent, currentUser, data.parentStudentLinks]);
   const [activeTab, setActiveTab] = useState<
-    "info" | "attendance" | "progress" | "homework" | "lessonlog" | "report"
+    "info" | "attendance" | "progress" | "homework" | "lessonlog" | "report" | "ezber"
   >("info");
   const [reportOpen, setReportOpen] = useState(false);
   const [reportPeriod, setReportPeriod] = useState("Aylık");
@@ -197,26 +202,76 @@ export function StudentProfilePage() {
     >
   >({});
   const [reportNote, setReportNote] = useState("");
+  const [memorizationMode, setMemorizationMode] = useState<MemorizationMode>("simple");
 
   useEffect(() => {
     data.loadStudents();
     data.loadSchools();
     data.loadLessons();
+    data.loadClassRooms();
     data.loadAttendance();
     data.loadProgress();
     data.loadComments();
     data.loadHomeworkAssignments();
     data.loadMemorizationTexts();
     data.loadMemorizationTracking();
+    data.loadMemorizationCriteria();
+    data.loadMemorizationSummary(profileId);
     data.loadStudentReports();
+    apiGet<{ value?: string }>("system-settings/memorization_mode")
+      .then((d) => {
+        const mode = d.value as MemorizationMode;
+        setMemorizationMode(["simple", "scoring", "detailed"].includes(mode) ? mode : "simple");
+      })
+      .catch(() => setMemorizationMode("simple"));
     data.loadLessonLogs();
+    data.loadParentStudentLinks();
   }, []);
 
-  if (isParent && parentStudentId && profileId !== parentStudentId) {
-    return <Navigate to={`/student-profile/${parentStudentId}`} replace />;
+  if (
+    isParent &&
+    allowedStudentIds.length > 0 &&
+    !allowedStudentIds.includes(profileId)
+  ) {
+    return <Navigate to="/parent-students" replace />;
   }
 
   const student = data.students.find((s) => s.id === Number(id));
+  const parentsOfStudent = useMemo(() => {
+    if (!student) return [];
+    const parentIds = data.getStudentParents(student.id);
+    return users.filter((u) => parentIds.includes(u.id));
+  }, [student?.id, data.parentStudentLinks, users]);
+
+  // Rapor dialogu açıldığında "Diğer" kategorili ders işlemelerini otomatik nota ekle
+  useEffect(() => {
+    if (!reportOpen || !student) return;
+    const otherLogs = data.lessonLogs
+      .filter(
+        (l) =>
+          l.studentId === student.id &&
+          l.category === "diger" &&
+          l.topic.trim() !== "",
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime(),
+      );
+    if (otherLogs.length > 0) {
+      setReportNote(
+        "Diğer çalışmalar:\n" +
+          otherLogs
+            .map(
+              (l) =>
+                `- ${l.topic}${l.notes ? ` (${l.notes})` : ""} — ${l.date || ""}`,
+            )
+            .join("\n"),
+      );
+    } else {
+      setReportNote("");
+    }
+  }, [reportOpen, student?.id, data.lessonLogs]);
+
   /*
   if (data.loadingStudents || data.loadingSchools || data.loadingLessons || data.loadingAttendance || data.loadingProgress || data.loadingComments || data.loadingHomeworkAssignments || data.loadingMemorizationTexts || data.loadingMemorizationTracking || data.loadingStudentReports || data.loadingLessonLogs) {
     return <Loading />;
@@ -269,20 +324,27 @@ export function StudentProfilePage() {
       ),
     );
 
-  const studentMemorization = data.memorizationTracking
-    .filter((m) => m.studentId === student.id)
-    .map((m) => {
-      const text = data.memorizationTexts.find((t) => t.id === m.textId);
-      return {
-        ...m,
-        textTitle: text?.title || `Metin #${m.textId}`,
-      };
-    })
-    .sort((a, b) =>
-      ((b.checkedAt || b.updatedAt || "") as string).localeCompare(
-        (a.checkedAt || a.updatedAt || "") as string,
-      ),
-    );
+  const summary = data.memorizationSummaries[profileId];
+  const memorizationCounts = summary?.statusCounts ?? {
+    passed: 0,
+    failed: 0,
+    repeat_tecvid: 0,
+    repeat_harf: 0,
+  };
+  const memorizationTotal = summary?.total ?? 0;
+  const memorizationSuccessRate = summary?.successRate ?? 0;
+  const memorizationPassed = summary?.passed ?? 0;
+  const memorizationNeedsRepeat = summary?.needsRepeat ?? [];
+  const memorizationRecent = summary?.recent ?? [];
+
+  const memorizationChartData = useMemo(() => {
+    return [
+      { name: "Geçti", value: memorizationCounts.passed, color: "#22c55e" },
+      { name: "Kaldı", value: memorizationCounts.failed, color: "#ef4444" },
+      { name: "Tekrar (Tecvid)", value: memorizationCounts.repeat_tecvid, color: "#f59e0b" },
+      { name: "Tekrar (Harf)", value: memorizationCounts.repeat_harf, color: "#3b82f6" },
+    ].filter((d) => d.value > 0);
+  }, [memorizationCounts]);
 
   // Ders isleme kayitlari
   const lessonLogs = data.getStudentLessonLogs(student.id);
@@ -456,13 +518,7 @@ export function StudentProfilePage() {
         <Button
           variant="outline"
           size="icon"
-          onClick={() =>
-            navigate(
-              isParent
-                ? `/student-profile/${parentStudentId ?? 0}`
-                : "/progress",
-            )
-          }
+          onClick={() => navigate(isParent ? "/parent-students" : "/progress")}
         >
           <ArrowLeft size={18} />
         </Button>
@@ -602,6 +658,13 @@ export function StudentProfilePage() {
           <FileText size={16} className="inline mr-1" />
           Raporlar ({studentReportsList.length})
         </button>
+        <button
+          onClick={() => setActiveTab("ezber")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "ezber" ? "border-emerald-600 text-emerald-700" : "border-transparent text-gray-500"}`}
+        >
+          <BookOpen size={16} className="inline mr-1" />
+          Ezber
+        </button>
       </div>
 
       {/* --- PROFIL TAB --- */}
@@ -659,6 +722,24 @@ export function StudentProfilePage() {
                   {student.parentPhone || "-"}
                 </span>
               </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Veliler</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {parentsOfStudent.length === 0 && (
+                <p className="text-gray-500">Veli atanmamış.</p>
+              )}
+              {parentsOfStudent.map((p) => (
+                <div key={p.id} className="flex justify-between">
+                  <span className="font-medium">{p.fullName}</span>
+                  <span className="text-gray-500">
+                    {p.phone || p.email || "-"}
+                  </span>
+                </div>
+              ))}
             </CardContent>
           </Card>
           <Card>
@@ -732,21 +813,21 @@ export function StudentProfilePage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-xs">Tarih</TableHead>
-                    <TableHead className="text-xs">Ders</TableHead>
+                    <TableHead className="text-xs">Sınıf</TableHead>
                     <TableHead className="text-xs">Durum</TableHead>
                     <TableHead className="text-xs">Not</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {studentAttendance.map((a) => {
-                    const lesson = data.lessons.find(
-                      (l) => l.id === a.lessonId,
+                    const cr = data.classRooms.find(
+                      (r) => r.id === a.classRoomId,
                     );
                     return (
                       <TableRow key={a.id}>
                         <TableCell className="text-xs">{a.date}</TableCell>
                         <TableCell className="text-xs">
-                          {lesson?.name || "-"}
+                          {cr?.name || "-"}
                         </TableCell>
                         <TableCell>
                           <Badge className={`${statusC[a.status]} text-xs`}>
@@ -949,23 +1030,23 @@ export function StudentProfilePage() {
                     <Plus size={16} className="mr-1" /> Yeni Rapor Ekle
                   </Button>
                 )}
-                {canManageReports && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.print()}
-                  >
-                    <Printer size={16} className="mr-1" /> Yazdır
-                  </Button>
-                )}
                 <Button
                   variant="outline"
                   size="sm"
-                  className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                  onClick={sendStyledReportMail}
+                  onClick={() => window.print()}
                 >
-                  <Mail size={16} className="mr-1" /> E-Posta
+                  <Printer size={16} className="mr-1" /> Yazdır
                 </Button>
+                {!isParent && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-blue-600 border-blue-300 hover:bg-blue-50"
+                    onClick={sendStyledReportMail}
+                  >
+                    <Mail size={16} className="mr-1" /> E-Posta
+                  </Button>
+                )}
                 {canManageReports && (
                   <Button
                     variant="outline"
@@ -1315,122 +1396,6 @@ export function StudentProfilePage() {
                   )}
                 </div>
 
-                {/* 5. Ezber Takibi Ozeti */}
-                <div className="w-full min-w-0">
-                  <h4 className="font-bold text-sm mb-3 flex items-center gap-2">
-                    <ListChecks size={16} className="text-emerald-600" /> Ezber
-                    Takibi Özeti
-                  </h4>
-                  {studentMemorization.length > 0 ? (
-                    <>
-                      <div className="mb-3 flex flex-wrap gap-2 text-xs">
-                        <Badge className="bg-green-600">
-                          Tamamladı:{" "}
-                          {
-                            studentMemorization.filter(
-                              (m) => m.status === "completed",
-                            ).length
-                          }
-                        </Badge>
-                        <Badge className="bg-amber-500">
-                          Tekrarlanacak:{" "}
-                          {
-                            studentMemorization.filter(
-                              (m) => m.status === "repeat",
-                            ).length
-                          }
-                        </Badge>
-                        <Badge className="bg-red-600">
-                          Tamamlanmadı:{" "}
-                          {
-                            studentMemorization.filter(
-                              (m) => m.status === "not_completed",
-                            ).length
-                          }
-                        </Badge>
-                      </div>
-                      <div className="sm:hidden space-y-2">
-                        {studentMemorization.map((m) => (
-                          <div
-                            key={m.id}
-                            className="rounded-lg border bg-white p-3 space-y-2"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="text-sm font-medium break-words">
-                                {m.textTitle}
-                              </p>
-                              <Badge
-                                className={`text-[10px] text-white ${m.status === "completed" ? "bg-green-500" : m.status === "repeat" ? "bg-amber-500" : "bg-red-500"}`}
-                              >
-                                {m.status === "completed"
-                                  ? "TAMAMLADI"
-                                  : m.status === "repeat"
-                                    ? "TEKRARLANACAK"
-                                    : "TAMAMLANMADI"}
-                              </Badge>
-                            </div>
-                            <p className="text-xs text-gray-500 break-words">
-                              {m.teacherNote || "-"}
-                            </p>
-                            <p className="text-[10px] text-gray-400">
-                              Kontrol: {m.checkedAt || "-"}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="hidden sm:block w-full max-w-full overflow-x-auto">
-                        <Table className="min-w-[720px]">
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="text-xs">
-                                Ezber Metni
-                              </TableHead>
-                              <TableHead className="text-xs text-center">
-                                Durum
-                              </TableHead>
-                              <TableHead className="text-xs">
-                                Öğretmen Notu
-                              </TableHead>
-                              <TableHead className="text-xs">
-                                Kontrol Tarihi
-                              </TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {studentMemorization.map((m) => (
-                              <TableRow key={m.id}>
-                                <TableCell className="text-xs font-medium">
-                                  {m.textTitle}
-                                </TableCell>
-                                <TableCell className="text-center">
-                                  <Badge
-                                    className={`text-[10px] text-white ${m.status === "completed" ? "bg-green-500" : m.status === "repeat" ? "bg-amber-500" : "bg-red-500"}`}
-                                  >
-                                    {m.status === "completed"
-                                      ? "Tamamladı"
-                                      : m.status === "repeat"
-                                        ? "Tekrarlanacak"
-                                        : "Tamamlanmadı"}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell className="text-xs text-gray-500">
-                                  {m.teacherNote || "-"}
-                                </TableCell>
-                                <TableCell className="text-xs">
-                                  {m.checkedAt || "-"}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-sm text-gray-500">
-                      Henüz ezber takip kaydı yok
-                    </p>
-                  )}
-                </div>
 
                 {/* Alt bilgi */}
                 <div className="border-t pt-4 text-center text-xs text-gray-400">
@@ -1570,7 +1535,7 @@ export function StudentProfilePage() {
                     <div className="flex gap-2">
                       <Button
                         onClick={() => {
-                          const items = Object.entries(reportItems).map(
+                          const baseItems = Object.entries(reportItems).map(
                             ([lessonId, item]) => {
                               const lesson = data.lessons.find(
                                 (l) => String(l.id) === lessonId,
@@ -1586,6 +1551,21 @@ export function StudentProfilePage() {
                               };
                             },
                           );
+                          const otherLogItems = data.lessonLogs
+                            .filter(
+                              (l) =>
+                                l.studentId === student.id &&
+                                l.category === "diger" &&
+                                l.topic.trim() !== "",
+                            )
+                            .map((l) => ({
+                              lessonName: "Diğer",
+                              subject: l.topic,
+                              teacherNote: l.notes,
+                              score: undefined,
+                              status: "baslangic" as const,
+                            }));
+                          const items = [...baseItems, ...otherLogItems];
                           data.addStudentReport({
                             studentId: student.id,
                             title: `${student.firstName} ${student.lastName} - ${reportPeriod} Rapor`,
@@ -1677,17 +1657,19 @@ export function StudentProfilePage() {
                         )}
                       </p>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 flex-shrink-0"
-                      onClick={() => {
-                        if (confirm("Ödev silinsin mi?"))
-                          data.deleteHomeworkAssignment(h.id);
-                      }}
-                    >
-                      <Trash2 size={14} className="text-red-500" />
-                    </Button>
+                    {!isParent && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 flex-shrink-0"
+                        onClick={() => {
+                          if (confirm("Ödev silinsin mi?"))
+                            data.deleteHomeworkAssignment(h.id);
+                        }}
+                      >
+                        <Trash2 size={14} className="text-red-500" />
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -1698,6 +1680,194 @@ export function StudentProfilePage() {
                 Henüz ödev atanmamış
               </CardContent>
             </Card>
+          )}
+        </div>
+      )}
+
+      {/* --- EZBER TAB --- */}
+      {activeTab === "ezber" && (
+        <div className="space-y-4">
+          {data.loadingMemorizationSummary ? (
+            <Card>
+              <CardContent className="p-8 text-center">
+                <Loading />
+              </CardContent>
+            </Card>
+          ) : !summary ? (
+            <Card>
+              <CardContent className="p-8 text-center text-gray-500">
+                Ezber verisi yüklenemedi
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-gray-500">Toplam Ezber</p>
+                    <p className="text-2xl font-bold">{memorizationTotal}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-gray-500">Başarı Oranı</p>
+                    <p className="text-2xl font-bold text-emerald-600">
+                      {memorizationSuccessRate}%
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-gray-500">Geçti</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {memorizationPassed}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-gray-500">Tekrar Gereken</p>
+                    <p className="text-2xl font-bold text-amber-600">
+                      {memorizationNeedsRepeat.length}
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Durum Dağılımı</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={memorizationChartData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={80}
+                          label
+                        >
+                          {memorizationChartData.map((entry, index) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={entry.color}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Son Ezberler</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0 overflow-x-auto">
+                  {memorizationRecent.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Metin</TableHead>
+                          <TableHead className="text-xs">Durum</TableHead>
+                          <TableHead className="text-xs">Not</TableHead>
+                          <TableHead className="text-xs">Tarih</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {memorizationRecent.slice(0, 10).map((m) => (
+                          <TableRow key={m.id}>
+                            <TableCell className="text-xs font-medium">
+                              {m.textTitle}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                className={`text-[10px] text-white ${m.status === "passed" ? "bg-green-500" : m.status === "repeat_tecvid" ? "bg-amber-500" : m.status === "repeat_harf" ? "bg-blue-500" : "bg-red-500"}`}
+                              >
+                                {m.status === "passed"
+                                  ? "Geçti"
+                                  : m.status === "repeat_tecvid"
+                                    ? "Tekrarlamalı (Tecvid)"
+                                    : m.status === "repeat_harf"
+                                      ? "Tekrarlamalı (Harf)"
+                                      : "Kaldı"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-gray-500">
+                              {m.teacherNote || "-"}
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {m.checkedAt || m.updatedAt || "-"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="p-6 text-center text-gray-500 text-sm">
+                      Henüz ezber kaydı yok
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Tekrar Gerekenler</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0 overflow-x-auto">
+                  {memorizationNeedsRepeat.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Metin</TableHead>
+                          <TableHead className="text-xs">Durum</TableHead>
+                          <TableHead className="text-xs">Not</TableHead>
+                          <TableHead className="text-xs">Tarih</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {memorizationNeedsRepeat.map((m) => (
+                          <TableRow key={m.id}>
+                            <TableCell className="text-xs font-medium">
+                              {m.textTitle}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                className={`text-[10px] text-white ${m.status === "repeat_tecvid" ? "bg-amber-500" : m.status === "repeat_harf" ? "bg-blue-500" : "bg-red-500"}`}
+                              >
+                                {m.status === "repeat_tecvid"
+                                  ? "Tekrarlamalı (Tecvid)"
+                                  : m.status === "repeat_harf"
+                                    ? "Tekrarlamalı (Harf)"
+                                    : "Kaldı"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs text-gray-500">
+                              {m.teacherNote || "-"}
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {m.checkedAt || m.updatedAt || "-"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="p-6 text-center text-gray-500 text-sm">
+                      Tekrar gereken ezber yok
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </>
           )}
         </div>
       )}

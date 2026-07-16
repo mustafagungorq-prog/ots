@@ -90,6 +90,37 @@ header('Access-Control-Allow-Origin: https://sizin-domain.com');
 | PUT | `/api/users/{id}` | Kullanici guncelle |
 | DELETE | `/api/users/{id}` | Kullanici sil |
 
+**POST /api/users**  
+Yetki: `superadmin`, `admin`  
+Zorunlu alanlar: `username`, `fullName`, `role`, `password`  
+Validation kurallari:
+- `username`: en az 3 karakter, sadece harf/rakam/alt cizgi, benzersiz.
+- `fullName`: en az 2 karakter.
+- `email`: gecerli e-posta formati ve benzersiz (bos olabilir).
+- `password`: en az 6 karakter, bcrypt ile hashlenir.
+- `role`: `superadmin`, `admin`, `authorized_teacher`, `teacher`, `parent` degerlerinden biri.
+- `active`: boolean, varsayilan `true`.
+
+Ornek istek:
+```bash
+curl -X POST http://localhost:8000/users \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "ahmet_hoca",
+    "fullName": "Ahmet Hoca",
+    "email": "ahmet@ornek.com",
+    "phone": "5551234567",
+    "password": "gucluSifre123",
+    "role": "teacher",
+    "active": true
+  }'
+```
+
+**PUT /api/users/{id}**  
+Yetki: `superadmin`, `admin`  
+Gonderilmeyen alanlar degistirilmez. `password` alani bos veya gonderilmezse sifre degismez; gonderilirse en az 6 karakter olmali ve hashlenir. `username` ve `email` diger kayitlarla cakismamalidir.
+
 ### Ogrenciler
 | Method | Endpoint | Aciklama |
 |--------|----------|----------|
@@ -107,13 +138,23 @@ header('Access-Control-Allow-Origin: https://sizin-domain.com');
 | PUT | `/api/schools/{id}` | Medrese guncelle |
 | DELETE | `/api/schools/{id}` | Medrese sil |
 
-### Dersler
+### Kurslar
 | Method | Endpoint | Aciklama |
 |--------|----------|----------|
-| GET | `/api/lessons` | Tum dersleri listele |
-| POST | `/api/lessons` | Yeni ders ekle |
-| PUT | `/api/lessons/{id}` | Ders guncelle |
-| DELETE | `/api/lessons/{id}` | Ders sil |
+| GET | `/api/courses` | Tum kurslari listele |
+| POST | `/api/courses` | Yeni kurs ekle |
+| PUT | `/api/courses/{id}` | Kurs guncelle |
+| DELETE | `/api/courses/{id}` | Kurs sil |
+
+### Ders Planlari
+| Method | Endpoint | Aciklama |
+|--------|----------|----------|
+| GET | `/api/course-schedules` | Tum ders planlarini listele |
+| POST | `/api/course-schedules` | Yeni ders plani ekle |
+| PUT | `/api/course-schedules/{id}` | Ders plani guncelle |
+| DELETE | `/api/course-schedules/{id}` | Ders plani sil |
+
+> `/api/lessons` endpoint'i geriye uyumluluk icin hala calisir; icerik olarak `course_schedules` tablosundan ders planlari dondurur.
 
 ### Gruplar (Siniflar)
 | Method | Endpoint | Aciklama |
@@ -126,8 +167,8 @@ header('Access-Control-Allow-Origin: https://sizin-domain.com');
 ### Yoklama
 | Method | Endpoint | Aciklama |
 |--------|----------|----------|
-| GET | `/api/attendance` | Yoklama listesi (studentId, date filtresi) |
-| POST | `/api/attendance` | Yoklama ekle |
+| GET | `/api/attendance` | Yoklama listesi (studentId, classRoomId, date filtresi) |
+| POST | `/api/attendance` | Yoklama ekle (artik `classRoomId` ile, `lessonId` kullanilmaz) |
 | PUT | `/api/attendance/{id}` | Yoklama guncelle |
 | DELETE | `/api/attendance/{id}` | Yoklama sil |
 
@@ -191,12 +232,20 @@ header('Access-Control-Allow-Origin: https://sizin-domain.com');
 | POST | `/api/lesson-logs` | Ders isleme kaydi ekle |
 | DELETE | `/api/lesson-logs/{id}` | Ders isleme kaydi sil |
 
-### Ogretmen-Ders Iliskisi
+**POST /api/lesson-logs**  
+Zorunlu alanlar: `studentId`, `date`, `category`, `topic`  
+`category` degerleri: `ilmihal`, `adab`, `tecvid`, `diger`  
+`category` degeri `diger` oldugunda `topic` alani serbest metin olarak kullanilabilir (ornegin: "Kelime Calismasi", "Vecize", "Ruku Egitimi").  
+`subTopic` opsiyoneldir; `sub_topic_required` sistem ayari aktifse zorunlu hale gelir.
+
+### Ogretmen-Ders Plani Iliskisi
 | Method | Endpoint | Aciklama |
 |--------|----------|----------|
-| GET | `/api/teacher-lessons` | Ogretmen-ders atamalari |
-| POST | `/api/teacher-lessons` | Ogretmene ders ata |
-| DELETE | `/api/teacher-lessons/{id}` | Ders atamasini kaldir |
+| GET | `/api/teacher-lessons` | Ogretmen-ders plani atamalari |
+| POST | `/api/teacher-lessons` | Ogretmene ders plani ata |
+| DELETE | `/api/teacher-lessons/{id}` | Ders plani atamasini kaldir |
+
+> Artik ogretmen atamasi dogrudan `course_schedules` tablosu uzerinden yonetilir. Bu endpoint geriye uyumluluk icin korunmustur.
 
 ### Dashboard
 | Method | Endpoint | Aciklama |
@@ -208,6 +257,22 @@ header('Access-Control-Allow-Origin: https://sizin-domain.com');
 |--------|----------|----------|
 | GET | `/api/permission-matrix` | Yetki matrisini listele |
 | PUT | `/api/permission-matrix/{id}` | Yetki guncelle |
+
+### Veli-Öğrenci Eşleştirme
+| Method | Endpoint | Aciklama |
+|--------|----------|----------|
+| GET | `/api/parent-student-links` | Tüm eşleştirmeleri listele (veli rolünde sadece kendi eşleştirmeleri) |
+| POST | `/api/parent-student-links` | Veli ile öğrenciyi eşleştir |
+| DELETE | `/api/parent-student-links?parentUserId=X&studentId=Y` | Eşleştirmeyi kaldır |
+
+**POST /api/parent-student-links**  
+Yetki: `superadmin`, `admin`  
+Zorunlu alanlar: `parentUserId`, `studentId`  
+Aynı veli-öğrenci çifti tekrar eklenemez.
+
+**DELETE /api/parent-student-links**  
+Yetki: `superadmin`, `admin`  
+Query parametreleri: `parentUserId`, `studentId`
 
 ## JWT Token Kullanimi
 
@@ -227,13 +292,36 @@ curl -X GET http://localhost:8000/students \
   -H "Authorization: Bearer eyJ0eXAi..."
 ```
 
+## Ezber Takip (Memorization)
+
+| Method | Endpoint | Aciklama |
+|--------|----------|----------|
+| GET | `/api/memorization-texts` | Ezber metinlerini listele |
+| POST | `/api/memorization-texts` | Yeni ezber metni ekle (superadmin/admin) |
+| PUT | `/api/memorization-texts/{id}` | Ezber metni guncelle (superadmin/admin) |
+| DELETE | `/api/memorization-texts/{id}` | Ezber metni sil (superadmin/admin) |
+| GET | `/api/memorization-tracking` | Ezber takip kayitlarini listele |
+| POST | `/api/memorization-tracking` | Ezber durumu/scores kaydet |
+| PUT | `/api/memorization-tracking/{id}` | Ezber kaydi guncelle |
+| DELETE | `/api/memorization-tracking/{id}` | Ezber kaydi sil |
+| GET | `/api/memorization-tracking/summary?studentId={id}` | **Tek sorguda** ogrenci ozeti: son ezberler, basari orani, tekrar gerekenler, grafik verisi |
+| GET | `/api/memorization-criteria` | Puanlama kriterlerini listele |
+| POST | `/api/memorization-criteria` | Yeni kriter ekle (superadmin/admin) |
+| PUT | `/api/memorization-criteria/{id}` | Kriter guncelle (superadmin/admin) |
+| DELETE | `/api/memorization-criteria/{id}` | Kriter sil (superadmin/admin) |
+
+`GET /api/memorization-tracking/summary` endpoint'i tek SQL sorgusu ile ogrenciye ait tum ezber kayitlarini, metin basliklarini ve kontrol eden kisi bilgilerini birlikte getirir; N+1 sorgu olusturmaz.
+
 ## Veritabani Tablolari
 
 | Tablo | Aciklama |
 |-------|----------|
 | `users` | Kullanicilar (superadmin, admin, ogretmen, veli) |
 | `schools` | Medreseler |
-| `lessons` | Dersler |
+| `courses` | Kurslar (ders katalogu) |
+| `course_schedules` | Ders planlari (kurs + ogretmen + sinif + gun + saat) |
+| `class_room_courses` | Sinif-kurs coka-cok iliskisi |
+| `student_courses` | Ogrenci-kurs coka-cok iliskisi |
 | `class_rooms` | Gruplar (Kudus, Medine, Mekke, Aksa) |
 | `students` | Ogrenciler |
 | `attendance` | Yoklama kayitlari |
@@ -244,11 +332,14 @@ curl -X GET http://localhost:8000/students \
 | `surveys` | Anketler |
 | `survey_questions` | Anket sorulari |
 | `survey_answers` | Anket cevaplari |
-| `homework_templates` | Odev sablonlari |
+| `homework_templates` | Odev sablonlari (`course_id` ile kursa bagli) |
 | `homework_assignments` | Odev atamalari |
 | `curriculum_topics` | Mufredat konulari (Ilmihal, Adab, Tecvid) |
 | `lesson_logs` | Ders isleme kayitlari |
-| `teacher_lessons` | Ogretmen-ders atamalari |
+| `parent_student_links` | Veli-ogrenci eslestirmeleri |
+| `memorization_texts` | Ezber metinleri |
+| `memorization_tracking` | Ogrenci-metin bazli ezber takip kayitlari |
+| `memorization_criteria` | Dinamik puanlama kriterleri |
 | `grid_column_permissions` | Grid kolon yetkileri |
 | `permission_matrix` | Yetki matrisi |
 

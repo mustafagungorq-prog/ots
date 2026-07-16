@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   ListChecks,
-  RotateCcw,
   XCircle,
+  BookOpen,
+  Type,
   Plus,
   Pencil,
   Trash2,
@@ -11,8 +12,9 @@ import {
 } from "lucide-react";
 import { useStudentData } from "@/hooks/useStudentData";
 import { useAuth } from "@/hooks/useAuth";
+import { apiGet } from "@/hooks/useApi";
 import { PERMISSIONS } from "@/types";
-import type { MemorizationStatus } from "@/types";
+import type { MemorizationStatus, MemorizationMode } from "@/types";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -49,25 +51,29 @@ import {
 
 type LocalStatus = {
   status: MemorizationStatus;
+  scores?: Record<string, number>;
   teacherNote: string;
 };
 
 const STATUS_OPTIONS: MemorizationStatus[] = [
-  "completed",
-  "repeat",
-  "not_completed",
+  "passed",
+  "failed",
+  "repeat_tecvid",
+  "repeat_harf",
 ];
 
 const STATUS_LABELS: Record<MemorizationStatus, string> = {
-  completed: "Tamamladı",
-  repeat: "Tekrarlanacak",
-  not_completed: "Tamamlanmadı",
+  passed: "Geçti",
+  failed: "Kaldı",
+  repeat_tecvid: "Tekrarlamalı (Tecvid)",
+  repeat_harf: "Tekrarlamalı (Harf)",
 };
 
 const STATUS_BADGES: Record<MemorizationStatus, string> = {
-  completed: "bg-green-500",
-  repeat: "bg-amber-500",
-  not_completed: "bg-red-500",
+  passed: "bg-green-500",
+  failed: "bg-red-500",
+  repeat_tecvid: "bg-amber-500",
+  repeat_harf: "bg-blue-500",
 };
 
 export function MemorizationTrackingPage() {
@@ -95,6 +101,7 @@ export function MemorizationTrackingPage() {
   const [editingTextId, setEditingTextId] = useState<number | null>(null);
   const [textTitle, setTextTitle] = useState("");
   const [textContent, setTextContent] = useState("");
+  const [memorizationMode, setMemorizationMode] = useState<MemorizationMode>("simple");
 
   const myLessonIds = useMemo(() => {
     if (!isTeacher || !currentUser) return [];
@@ -138,6 +145,11 @@ export function MemorizationTrackingPage() {
   const myGroups = useMemo(
     () => data.classRooms.filter((g) => myGroupIds.includes(g.id)),
     [data.classRooms, myGroupIds],
+  );
+
+  const activeCriteria = useMemo(
+    () => data.memorizationCriteria.filter((c) => c.active).sort((a, b) => a.sortOrder - b.sortOrder),
+    [data.memorizationCriteria],
   );
 
   const assignmentScopedStudents = useMemo(() => {
@@ -200,6 +212,7 @@ export function MemorizationTrackingPage() {
       .forEach((r) => {
         map[r.studentId] = {
           status: r.status,
+          scores: r.scores ? { ...r.scores } : undefined,
           teacherNote: r.teacherNote || "",
         };
       });
@@ -210,10 +223,17 @@ export function MemorizationTrackingPage() {
   useEffect(() => {
     data.loadMemorizationTexts();
     data.loadMemorizationTracking();
+    data.loadMemorizationCriteria();
     data.loadStudents();
     data.loadLessons();
     data.loadClassRooms();
     refreshTeacherLessons();
+    apiGet<{ value?: string }>("system-settings/memorization_mode")
+      .then((d) => {
+        const mode = d.value as MemorizationMode;
+        setMemorizationMode(["simple", "scoring", "detailed"].includes(mode) ? mode : "simple");
+      })
+      .catch(() => setMemorizationMode("simple"));
   }, []);
   /*
   if (
@@ -227,14 +247,18 @@ export function MemorizationTrackingPage() {
     return <Loading />;
   }*/
 
-  const completedCount = Object.values(localStatuses).filter(
-    (x) => x.status === "completed",
+  const passedCount = Object.values(localStatuses).filter(
+    (x) => x.status === "passed",
   ).length;
-  const repeatCount = Object.values(localStatuses).filter(
-    (x) => x.status === "repeat",
+  const failedCount = Object.values(localStatuses).filter(
+    (x) => x.status === "failed",
   ).length;
-  const notCompletedCount =
-    filteredStudents.length - completedCount - repeatCount;
+  const repeatTecvidCount = Object.values(localStatuses).filter(
+    (x) => x.status === "repeat_tecvid",
+  ).length;
+  const repeatHarfCount = Object.values(localStatuses).filter(
+    (x) => x.status === "repeat_harf",
+  ).length;
 
   const openCreateDialog = () => {
     setEditingTextId(null);
@@ -266,21 +290,61 @@ export function MemorizationTrackingPage() {
     setDialogOpen(false);
   };
 
+  const computeStatusFromScores = (
+    scores: Record<string, number> | undefined,
+  ): MemorizationStatus => {
+    if (!scores || activeCriteria.length === 0) return "failed";
+    let weightedSum = 0;
+    let totalWeight = 0;
+    activeCriteria.forEach((c) => {
+      const score = scores[c.code] ?? 0;
+      weightedSum += score * c.weight;
+      totalWeight += c.weight;
+    });
+    if (totalWeight === 0) return "failed";
+    const avg = weightedSum / totalWeight;
+    if (avg >= 70) return "passed";
+    if (avg >= 50) return "repeat_tecvid";
+    return "failed";
+  };
+
   const updateLocalStatus = (studentId: number, status: MemorizationStatus) => {
     setLocalStatuses((prev) => ({
       ...prev,
       [studentId]: {
         status,
+        scores: prev[studentId]?.scores,
         teacherNote: prev[studentId]?.teacherNote || "",
       },
     }));
+  };
+
+  const updateLocalScore = (
+    studentId: number,
+    code: string,
+    value: number,
+  ) => {
+    setLocalStatuses((prev) => {
+      const nextScores = { ...(prev[studentId]?.scores || {}) };
+      nextScores[code] = value;
+      const autoStatus = computeStatusFromScores(nextScores);
+      return {
+        ...prev,
+        [studentId]: {
+          status: autoStatus,
+          scores: nextScores,
+          teacherNote: prev[studentId]?.teacherNote || "",
+        },
+      };
+    });
   };
 
   const updateLocalNote = (studentId: number, teacherNote: string) => {
     setLocalStatuses((prev) => ({
       ...prev,
       [studentId]: {
-        status: prev[studentId]?.status || "not_completed",
+        status: prev[studentId]?.status || "failed",
+        scores: prev[studentId]?.scores,
         teacherNote,
       },
     }));
@@ -289,7 +353,7 @@ export function MemorizationTrackingPage() {
   const saveStudentStatus = (studentId: number) => {
     if (!selectedTextId) return;
     const row = localStatuses[studentId] || {
-      status: "not_completed" as MemorizationStatus,
+      status: "failed" as MemorizationStatus,
       teacherNote: "",
     };
     data.setMemorizationStatus(
@@ -297,6 +361,7 @@ export function MemorizationTrackingPage() {
       Number(selectedTextId),
       row.status,
       row.teacherNote,
+      row.scores,
     );
   };
 
@@ -304,7 +369,7 @@ export function MemorizationTrackingPage() {
     if (!selectedTextId) return;
     filteredStudents.forEach((student) => {
       const row = localStatuses[student.id] || {
-        status: "not_completed" as MemorizationStatus,
+        status: "failed" as MemorizationStatus,
         teacherNote: "",
       };
       data.setMemorizationStatus(
@@ -312,6 +377,7 @@ export function MemorizationTrackingPage() {
         Number(selectedTextId),
         row.status,
         row.teacherNote,
+        row.scores,
       );
     });
   };
@@ -507,23 +573,29 @@ export function MemorizationTrackingPage() {
         <>
           <Card>
             <CardContent className="p-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <div className="rounded-lg bg-green-50 p-3 border border-green-200">
-                  <p className="text-xs text-green-700">Tamamladı</p>
+                  <p className="text-xs text-green-700">Geçti</p>
                   <p className="text-xl font-semibold text-green-700">
-                    {completedCount}
+                    {passedCount}
                   </p>
                 </div>
                 <div className="rounded-lg bg-amber-50 p-3 border border-amber-200">
-                  <p className="text-xs text-amber-700">Tekrarlanacak</p>
+                  <p className="text-xs text-amber-700">Tekrarlamalı (Tecvid)</p>
                   <p className="text-xl font-semibold text-amber-700">
-                    {repeatCount}
+                    {repeatTecvidCount}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-blue-50 p-3 border border-blue-200">
+                  <p className="text-xs text-blue-700">Tekrarlamalı (Harf)</p>
+                  <p className="text-xl font-semibold text-blue-700">
+                    {repeatHarfCount}
                   </p>
                 </div>
                 <div className="rounded-lg bg-red-50 p-3 border border-red-200">
-                  <p className="text-xs text-red-700">Tamamlanmadı</p>
+                  <p className="text-xs text-red-700">Kaldı</p>
                   <p className="text-xl font-semibold text-red-700">
-                    {notCompletedCount < 0 ? 0 : notCompletedCount}
+                    {failedCount}
                   </p>
                 </div>
               </div>
@@ -543,7 +615,14 @@ export function MemorizationTrackingPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-xs">Öğrenci</TableHead>
-                    <TableHead className="text-xs">Durum</TableHead>
+                    {memorizationMode === "simple" ? (
+                      <TableHead className="text-xs">Durum</TableHead>
+                    ) : (
+                      <>
+                        <TableHead className="text-xs">Kriterler</TableHead>
+                        <TableHead className="text-xs">Durum</TableHead>
+                      </>
+                    )}
                     <TableHead className="text-xs">Öğretmen Notu</TableHead>
                     <TableHead className="text-xs text-right">İşlem</TableHead>
                   </TableRow>
@@ -551,7 +630,7 @@ export function MemorizationTrackingPage() {
                 <TableBody>
                   {filteredStudents.map((student) => {
                     const row = localStatuses[student.id] || {
-                      status: "not_completed" as MemorizationStatus,
+                      status: "failed" as MemorizationStatus,
                       teacherNote: "",
                     };
                     return (
@@ -559,47 +638,107 @@ export function MemorizationTrackingPage() {
                         <TableCell className="font-medium text-sm">
                           {student.firstName} {student.lastName}
                         </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1 flex-wrap">
-                            {STATUS_OPTIONS.map((status) => (
-                              <Button
-                                key={status}
-                                type="button"
-                                size="sm"
-                                variant={
-                                  row.status === status ? "default" : "outline"
-                                }
-                                className={
-                                  row.status === status
-                                    ? `${STATUS_BADGES[status]} text-white`
-                                    : ""
-                                }
-                                onClick={() =>
-                                  updateLocalStatus(student.id, status)
-                                }
+                        {memorizationMode === "simple" ? (
+                          <TableCell>
+                            <div className="flex gap-1 flex-wrap">
+                              {STATUS_OPTIONS.map((status) => (
+                                <Button
+                                  key={status}
+                                  type="button"
+                                  size="sm"
+                                  variant={
+                                    row.status === status ? "default" : "outline"
+                                  }
+                                  className={
+                                    row.status === status
+                                      ? `${STATUS_BADGES[status]} text-white`
+                                      : ""
+                                  }
+                                  onClick={() =>
+                                    updateLocalStatus(student.id, status)
+                                  }
+                                >
+                                  {status === "passed" && (
+                                    <CheckCircle2 size={13} className="mr-1" />
+                                  )}
+                                  {status === "failed" && (
+                                    <XCircle size={13} className="mr-1" />
+                                  )}
+                                  {status === "repeat_tecvid" && (
+                                    <BookOpen size={13} className="mr-1" />
+                                  )}
+                                  {status === "repeat_harf" && (
+                                    <Type size={13} className="mr-1" />
+                                  )}
+                                  {STATUS_LABELS[status]}
+                                </Button>
+                              ))}
+                            </div>
+                          </TableCell>
+                        ) : (
+                          <>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-3 items-center">
+                                {activeCriteria.map((c) => (
+                                  <div
+                                    key={c.code}
+                                    className="flex items-center gap-1"
+                                  >
+                                    <Label className="text-[10px] whitespace-nowrap">
+                                      {c.label}
+                                    </Label>
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      max={c.maxScore}
+                                      value={row.scores?.[c.code] ?? ""}
+                                      onChange={(e) =>
+                                        updateLocalScore(
+                                          student.id,
+                                          c.code,
+                                          Number(e.target.value),
+                                        )
+                                      }
+                                      className="w-16 h-7 text-xs px-1"
+                                    />
+                                  </div>
+                                ))}
+                                {activeCriteria.length === 0 && (
+                                  <span className="text-xs text-gray-400">
+                                    Kriter tanımlanmamış
+                                  </span>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                className={`text-[10px] text-white ${STATUS_BADGES[row.status]}`}
                               >
-                                {status === "completed" && (
-                                  <CheckCircle2 size={13} className="mr-1" />
-                                )}
-                                {status === "repeat" && (
-                                  <RotateCcw size={13} className="mr-1" />
-                                )}
-                                {status === "not_completed" && (
-                                  <XCircle size={13} className="mr-1" />
-                                )}
-                                {STATUS_LABELS[status]}
-                              </Button>
-                            ))}
-                          </div>
-                        </TableCell>
+                                {STATUS_LABELS[row.status]}
+                              </Badge>
+                            </TableCell>
+                          </>
+                        )}
                         <TableCell>
-                          <Input
-                            value={row.teacherNote}
-                            onChange={(e) =>
-                              updateLocalNote(student.id, e.target.value)
-                            }
-                            placeholder="Not"
-                          />
+                          {memorizationMode === "detailed" ? (
+                            <Textarea
+                              value={row.teacherNote}
+                              onChange={(e) =>
+                                updateLocalNote(student.id, e.target.value)
+                              }
+                              placeholder="Ayrıntılı not"
+                              rows={2}
+                              className="min-w-[180px]"
+                            />
+                          ) : (
+                            <Input
+                              value={row.teacherNote}
+                              onChange={(e) =>
+                                updateLocalNote(student.id, e.target.value)
+                              }
+                              placeholder="Not"
+                            />
+                          )}
                         </TableCell>
                         <TableCell className="text-right">
                           <Button

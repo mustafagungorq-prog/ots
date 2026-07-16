@@ -26,8 +26,11 @@ import { UsersPage } from "./app/pages/UsersPage";
 import { SurveyManagementPage } from "./app/pages/SurveyManagementPage";
 import { StudentProfilePage } from "./app/pages/StudentProfilePage";
 import { HomeworkTemplatesPage } from "./app/pages/HomeworkTemplatesPage";
+import { HomeworkTrackingPage } from "./app/pages/HomeworkTrackingPage";
 import { MemorizationTrackingPage } from "./app/pages/MemorizationTrackingPage";
 import { MemorizationTextsAdminPage } from "./app/pages/MemorizationTextsAdminPage";
+import { ParentStudentLinksPage } from "./app/pages/ParentStudentLinksPage";
+import { ParentStudentsPage } from "./app/pages/ParentStudentsPage";
 
 const routeConfig = [
   {
@@ -63,7 +66,7 @@ const routeConfig = [
   {
     path: "/attendance",
     component: AttendancePage,
-    roles: ["superadmin", "admin", "authorized_teacher"],
+    roles: ["superadmin", "admin", "authorized_teacher", "teacher"],
   },
   {
     path: "/progress",
@@ -106,6 +109,11 @@ const routeConfig = [
     roles: ["superadmin", "admin"],
   },
   {
+    path: "/homework-tracking",
+    component: HomeworkTrackingPage,
+    roles: PERMISSIONS.PROGRESS_CREATE,
+  },
+  {
     path: "/memorization-tracking",
     component: MemorizationTrackingPage,
     roles: PERMISSIONS.MEMORIZATION_TRACK,
@@ -114,6 +122,16 @@ const routeConfig = [
     path: "/memorization-texts-admin",
     component: MemorizationTextsAdminPage,
     roles: ["superadmin", "admin"],
+  },
+  {
+    path: "/parent-student-links",
+    component: ParentStudentLinksPage,
+    roles: ["superadmin", "admin"],
+  },
+  {
+    path: "/parent-students",
+    component: ParentStudentsPage,
+    roles: ["parent"],
   },
   {
     path: "/student-profile/:id",
@@ -138,11 +156,12 @@ function AppRouter() {
 
     const role = currentUser.role;
 
-    if (role === "parent") {
-      const target = `/student-profile/${currentUser.linkedStudentIds?.[0] ?? 0}`;
-
-      if (location.pathname !== target) {
-        navigate(target, { replace: true });
+    if (role === "parent" && location.pathname === "/") {
+      const linkedIds = currentUser.linkedStudentIds || [];
+      if (linkedIds.length === 1) {
+        navigate(`/student-profile/${linkedIds[0]}`, { replace: true });
+      } else {
+        navigate("/parent-students", { replace: true });
       }
 
       return;
