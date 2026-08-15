@@ -28,6 +28,19 @@ class JWT {
     }
 }
 
+function usersApprovedColumnExists() {
+    return function_exists('columnExists') && columnExists('users', 'approved');
+}
+
+function usersApprovalSelectSql() {
+    return usersApprovedColumnExists() ? ', approved' : '';
+}
+
+function usersApprovalWhereSql($prefix = '') {
+    if (!usersApprovedColumnExists()) return '';
+    return ' AND ' . ($prefix ? $prefix . '.' : '') . 'approved = TRUE';
+}
+
 function getAuthUser() {
     $auth = '';
     if (function_exists('getallheaders')) {
@@ -40,7 +53,9 @@ function getAuthUser() {
     $token = str_replace('Bearer ', '', $auth);
     $payload = JWT::decode($token);
     if (!$payload) { http_response_code(401); echo json_encode(['error' => 'Invalid token']); exit; }
-    $stmt = getDb()->prepare("SELECT id, username, full_name, email, phone, role, active FROM users WHERE id = ? AND active = TRUE");
+    $approvalSelect = usersApprovalSelectSql();
+    $approvalWhere = usersApprovalWhereSql();
+    $stmt = getDb()->prepare("SELECT id, username, full_name, email, phone, role, school_id, active{$approvalSelect} FROM users WHERE id = ? AND active = TRUE{$approvalWhere}");
     $stmt->execute([$payload['sub']]);
     $user = $stmt->fetch();
     if (!$user) { http_response_code(401); echo json_encode(['error' => 'User not found']); exit; }

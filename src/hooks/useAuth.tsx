@@ -7,9 +7,10 @@ import {
 } from "react";
 import type { User, GridColumnPermission, UserRole } from "@/types";
 import { DEFAULT_GRID_COLUMN_PERMISSIONS } from "@/types";
-import { apiGet, apiPost, apiPut } from "./useApi";
+import { apiGet, apiPost, apiPut, apiDelete } from "./useApi";
 
 function normalizeUser(u: any): User {
+  const schoolId = u?.schoolId ?? u?.school_id ?? null;
   return {
     id: Number(u?.id ?? 0),
     username: u?.username ?? "",
@@ -19,12 +20,12 @@ function normalizeUser(u: any): User {
     email: u?.email ?? "",
     phone: u?.phone ?? "",
     active: u?.active !== false && u?.active !== 0 && u?.active !== "0",
-    assignedLessons: u?.assignedLessons,
+    approved: u?.approved !== undefined ? u?.approved !== false && u?.approved !== 0 && u?.approved !== "0" : undefined,
+    schoolId: schoolId !== null && schoolId !== undefined && schoolId !== "" ? Number(schoolId) : null,
     linkedStudentIds: u?.linkedStudentIds,
   };
 }
 
-const SESSION_KEY = "ots_session";
 const SESSION_ACTIVITY_KEY = "ots_activity";
 const SESSION_DURATION = 30 * 60 * 1000;
 
@@ -143,7 +144,7 @@ const DEFAULT_PERMISSION_MATRIX: PermissionMatrixEntry[] = [
     label: "Kullanici Yonetimi",
     superadmin: true,
     admin: true,
-    authorized_teacher: false,
+    authorized_teacher: true,
     teacher: false,
     parent: false,
   },
@@ -153,6 +154,13 @@ interface AuthContextType {
   currentUser: User | null;
   users: User[];
   login: (username: string, password: string) => Promise<boolean>;
+  registerParent: (payload: {
+    username: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    password: string;
+  }) => Promise<{ token?: string; user?: User; pending?: boolean; message?: string }>;
   logout: () => void;
   hasPermission: (allowedRoles: readonly string[]) => boolean;
   canCreate: boolean;
@@ -171,7 +179,6 @@ interface AuthContextType {
   isNormalTeacher: boolean;
   canViewColumn: (gridId: string, columnKey: string) => boolean;
   usersLoaded: boolean;
-  teacherLessonsLoaded: boolean;
   initialized: boolean;
   sessionExpired: boolean;
   clearSessionExpired: () => void;
@@ -182,21 +189,14 @@ interface AuthContextType {
   deleteUser: (id: number) => Promise<void>;
   changePassword: (userId: number, newPassword: string) => Promise<void>;
   refreshUsers: () => Promise<void>;
-  teacherLessons: { id?: number; teacherId: number; lessonId: number }[];
-  assignLessonToTeacher: (teacherId: number, lessonId: number) => Promise<void>;
-  unassignLessonFromTeacher: (
-    teacherId: number,
-    lessonId: number,
-  ) => Promise<void>;
-  getAssignedLessons: (teacherId: number) => number[];
-  refreshTeacherLessons: () => Promise<void>;
   getColumnsForGrid: (gridId: string) => GridColumnPermission[];
   updateGridColumnPermission: (
     gridId: string,
     columnKey: string,
     allowedRoles: UserRole[],
-  ) => void;
-  resetGridColumnsToDefaults: () => void;
+    columnLabel?: string,
+  ) => Promise<void>;
+  resetGridColumnsToDefaults: () => Promise<void>;
   permissionMatrix: PermissionMatrixEntry[];
   updatePermissionMatrixEntry: (
     entryId: string,
@@ -223,11 +223,7 @@ function updateLastActivity() {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
-  const [teacherLessons, setTeacherLessons] = useState<
-    { id?: number; teacherId: number; lessonId: number }[]
-  >([]);
   const [usersLoaded, setUsersLoaded] = useState(false);
-  const [teacherLessonsLoaded, setTeacherLessonsLoaded] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -259,6 +255,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!currentUser) return;
+    apiGet<any[]>("grid-column-permissions")
+      .then((rows) => {
+        if (!rows || rows.length === 0) return;
+        const dbMap = new Map(
+          rows.map((r) => [`${r.grid_id}:${r.column_key}`, r]),
+        );
+        const merged = DEFAULT_GRID_COLUMN_PERMISSIONS.map((def) => {
+          const db = dbMap.get(`${def.gridId}:${def.columnKey}`);
+          if (!db) return def;
+          return {
+            ...def,
+            columnLabel: db.column_label || def.columnLabel,
+            allowedRoles: Array.isArray(db.allowed_roles)
+              ? db.allowed_roles
+              : def.allowedRoles,
+          };
+        });
+        setGridColumnPermissions(merged);
+      })
+      .catch(() => {
+        // Fall back to DEFAULT_GRID_COLUMN_PERMISSIONS if table is missing.
+      });
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
     updateLastActivity();
     const iv = setInterval(() => {
       if (Date.now() - getLastActivity() > SESSION_DURATION) {
@@ -287,21 +309,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const refreshTeacherLessons = useCallback(async () => {
-    try {
-      const d = await apiGet<any[]>("teacher-lessons");
-      setTeacherLessons(
-        d.map((t) => ({ id: t.id, teacherId: t.teacher_id, lessonId: t.lesson_id })),
-      );
-    } catch {
-      setTeacherLessons([]);
-    } finally {
-      setTeacherLessonsLoaded(true);
-    }
-  }, []);
-
   const login = useCallback(
     async (username: string, password: string): Promise<boolean> => {
+      // Önceki oturuma ait yerel verileri temizle
+      localStorage.clear();
+      sessionStorage.clear();
       setLoading(true);
       setError(null);
       try {
@@ -326,13 +338,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const registerParent = useCallback(
+    async (payload: {
+      username: string;
+      fullName: string;
+      email: string;
+      phone: string;
+      password: string;
+    }) => {
+      localStorage.clear();
+      sessionStorage.clear();
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await apiPost<{
+          token?: string;
+          user?: any;
+          pending?: boolean;
+          message?: string;
+        }>("auth/register-parent", payload);
+        if (data.token && data.user) {
+          localStorage.setItem("ots_token", data.token);
+          setCurrentUser(normalizeUser(data.user));
+          updateLastActivity();
+        }
+        return data;
+      } catch (err: any) {
+        setError(err.message || "Kayıt başarısız oldu");
+        throw err;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
   const logout = useCallback(() => {
     setCurrentUser(null);
     setUsers([]);
-    setTeacherLessons([]);
-    localStorage.removeItem("ots_token");
-    localStorage.removeItem(SESSION_KEY);
-    sessionStorage.removeItem(SESSION_ACTIVITY_KEY);
+    localStorage.clear();
+    sessionStorage.clear();
   }, []);
 
   const hasPermission = useCallback(
@@ -378,36 +423,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const assignLessonToTeacher = useCallback(
-    async (teacherId: number, lessonId: number) => {
-      await apiPost("teacher-lessons", { teacherId, lessonId });
-      await refreshTeacherLessons();
-    },
-    [refreshTeacherLessons],
-  );
-
-  const unassignLessonFromTeacher = useCallback(
-    async (teacherId: number, lessonId: number) => {
-      const record = teacherLessons.find(
-        (t) => t.teacherId === teacherId && t.lessonId === lessonId,
-      );
-      if (record) {
-        await apiDelete(`teacher-lessons/${record.id || 0}`);
-        await refreshTeacherLessons();
-      }
-    },
-    [teacherLessons, refreshTeacherLessons],
-  );
-
-  const getAssignedLessons = useCallback(
-    (teacherId: number): number[] => {
-      return teacherLessons
-        .filter((a) => a.teacherId === teacherId)
-        .map((a) => a.lessonId);
-    },
-    [teacherLessons],
-  );
-
   const getColumnsForGrid = useCallback(
     (gridId: string): GridColumnPermission[] => {
       return gridColumnPermissions.filter((p) => p.gridId === gridId);
@@ -416,7 +431,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateGridColumnPermission = useCallback(
-    (gridId: string, columnKey: string, allowedRoles: UserRole[]) => {
+    async (
+      gridId: string,
+      columnKey: string,
+      allowedRoles: UserRole[],
+      columnLabel?: string,
+    ) => {
       setGridColumnPermissions((prev) =>
         prev.map((p) =>
           p.gridId === gridId && p.columnKey === columnKey
@@ -424,14 +444,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             : p,
         ),
       );
+      try {
+        await apiPut("grid-column-permissions", {
+          gridId,
+          columnKey,
+          allowedRoles,
+          columnLabel,
+        });
+      } catch {
+        /* keep optimistic UI update */
+      }
     },
     [],
   );
 
-  const resetGridColumnsToDefaults = useCallback(
-    () => setGridColumnPermissions(DEFAULT_GRID_COLUMN_PERMISSIONS),
-    [],
-  );
+  const resetGridColumnsToDefaults = useCallback(async () => {
+    setGridColumnPermissions(DEFAULT_GRID_COLUMN_PERMISSIONS);
+    try {
+      await apiDelete("grid-column-permissions");
+    } catch {
+      /* fallback to defaults already applied */
+    }
+  }, []);
 
   const updatePermissionMatrixEntry = useCallback(
     (entryId: string, role: UserRole, value: boolean) => {
@@ -580,6 +614,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         currentUser,
         users,
         login,
+        registerParent,
         logout,
         hasPermission,
         canCreate: hasPermission(["superadmin", "admin", "authorized_teacher"]),
@@ -611,9 +646,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           "authorized_teacher",
         ]),
         canManagePermission: hasPermission(["superadmin"]),
-        canManageUser: hasPermission(["superadmin", "admin"]),
+        canManageUser: hasPermission(["superadmin", "admin", "authorized_teacher"]),
         usersLoaded,
-        teacherLessonsLoaded,
         isAuthorizedTeacher,
         isNormalTeacher,
         canViewColumn,
@@ -627,11 +661,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         deleteUser,
         changePassword,
         refreshUsers,
-        teacherLessons,
-        assignLessonToTeacher,
-        unassignLessonFromTeacher,
-        getAssignedLessons,
-        refreshTeacherLessons,
         getColumnsForGrid,
         updateGridColumnPermission,
         resetGridColumnsToDefaults,
@@ -650,15 +679,4 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
-}
-
-async function apiDelete<T>(path: string): Promise<T> {
-  const token = localStorage.getItem("ots_token");
-  const res = await fetch(`/api/${path}`, {
-    method: "DELETE",
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-  return data;
 }

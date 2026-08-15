@@ -213,6 +213,7 @@ export function UsersPage() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [selectedParentStudentId, setSelectedParentStudentId] =
     useState<string>("");
+  const [activeTab, setActiveTab] = useState<"users" | "parents">("users");
   const userFormValid = useMemo(() => {
     const { valid } = validateUserForm(
       userForm,
@@ -327,102 +328,226 @@ export function UsersPage() {
           </Button>
         )}
       </div>
-      <Card>
-        <CardContent className="p-0 overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">Kullanıcı</TableHead>
-                <TableHead className="text-xs">Ad Soyad</TableHead>
-                <TableHead className="text-xs">Rol</TableHead>
-                <TableHead className="text-xs">E-posta</TableHead>
-                <TableHead className="text-xs">Telefon</TableHead>
-                <TableHead className="text-xs">Durum</TableHead>
-                <TableHead className="text-xs">İşlem</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {users.map((u) => (
-                <TableRow
-                  key={u.id}
-                  className={u.id === currentUser?.id ? "bg-blue-50" : ""}
-                >
-                  <TableCell className="font-medium text-sm">
-                    {u.username}
-                    {u.id === currentUser?.id && (
-                      <Badge variant="outline" className="text-[10px] ml-1">
-                        Siz
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-sm">{getDisplayName(u)}</TableCell>
-                  <TableCell>
-                    <Badge
-                      className={`${ROLE_COLORS[u.role]} text-white text-xs`}
-                    >
-                      {ROLE_LABELS[u.role]}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm">{u.email}</TableCell>
-                  <TableCell className="text-sm">{u.phone}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={u.active ? "default" : "secondary"}
-                      className="text-xs"
-                    >
-                      {u.active ? "Aktif" : "Pasif"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedUser(u);
-                          setOpen(true);
-                        }}
-                      >
-                        <Shield size={14} className="mr-1" /> Şifre Değiştir
-                      </Button>
-                      {canManageUser && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setEditingUser(u);
-                            setUserForm({
-                              username: u.username,
-                              fullName: u.fullName,
-                              email: u.email,
-                              phone: u.phone,
-                              role: u.role,
-                              active: u.active,
-                            });
-                            setSelectedParentStudentId(
-                              u.role === "parent"
-                                ? String(
-                                    data.parentStudentLinks.find(
-                                      (l) => l.parentUserId === u.id,
-                                    )?.studentId ?? "",
-                                  )
-                                : "",
-                            );
-                            setFormErrors({});
-                            setUserFormOpen(true);
-                          }}
-                        >
-                          <Pencil size={14} className="mr-1" /> Düzenle
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
+      <div className="flex gap-2 border-b">
+        <button
+          onClick={() => setActiveTab("users")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "users" ? "border-emerald-600 text-emerald-700" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+        >
+          Kullanıcılar
+        </button>
+        <button
+          onClick={() => setActiveTab("parents")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "parents" ? "border-emerald-600 text-emerald-700" : "border-transparent text-gray-500 hover:text-gray-700"}`}
+        >
+          Veliler
+        </button>
+      </div>
+
+      {activeTab === "users" && (
+        <Card>
+          <CardContent className="p-0 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Kullanıcı</TableHead>
+                  <TableHead className="text-xs">Ad Soyad</TableHead>
+                  <TableHead className="text-xs">Rol</TableHead>
+                  <TableHead className="text-xs">Medrese</TableHead>
+                  <TableHead className="text-xs">E-posta</TableHead>
+                  <TableHead className="text-xs">Telefon</TableHead>
+                  <TableHead className="text-xs">Durum</TableHead>
+                  <TableHead className="text-xs">İşlem</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {users
+                  .filter((u) => u.role !== "parent")
+                  .map((u) => (
+                    <TableRow
+                      key={u.id}
+                      className={u.id === currentUser?.id ? "bg-blue-50" : ""}
+                    >
+                      <TableCell className="font-medium text-sm">
+                        {u.username}
+                        {u.id === currentUser?.id && (
+                          <Badge variant="outline" className="text-[10px] ml-1">
+                            Siz
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {getDisplayName(u)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          className={`${ROLE_COLORS[u.role]} text-white text-xs`}
+                        >
+                          {ROLE_LABELS[u.role]}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {data.schools.find((s) => s.id === u.schoolId)?.name ||
+                          "-"}
+                      </TableCell>
+                      <TableCell className="text-sm">{u.email}</TableCell>
+                      <TableCell className="text-sm">{u.phone}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={u.active ? "default" : "secondary"}
+                          className="text-xs"
+                        >
+                          {u.active ? "Aktif" : "Pasif"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedUser(u);
+                              setOpen(true);
+                            }}
+                          >
+                            <Shield size={14} className="mr-1" /> Şifre
+                            Değiştir
+                          </Button>
+                          {canManageUser && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setEditingUser(u);
+                                setUserForm({
+                                  username: u.username,
+                                  fullName: u.fullName,
+                                  email: u.email,
+                                  phone: u.phone,
+                                  role: u.role,
+                                  schoolId: u.schoolId ?? null,
+                                  active: u.active,
+                                });
+                                setSelectedParentStudentId("");
+                                setFormErrors({});
+                                setUserFormOpen(true);
+                              }}
+                            >
+                              <Pencil size={14} className="mr-1" /> Düzenle
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === "parents" && (
+        <Card>
+          <CardContent className="p-0 overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Kullanıcı</TableHead>
+                  <TableHead className="text-xs">Ad Soyad</TableHead>
+                  <TableHead className="text-xs">E-posta</TableHead>
+                  <TableHead className="text-xs">Telefon</TableHead>
+                  <TableHead className="text-xs">Öğrenci</TableHead>
+                  <TableHead className="text-xs">Durum</TableHead>
+                  <TableHead className="text-xs">İşlem</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {users
+                  .filter((u) => u.role === "parent")
+                  .map((u) => {
+                    const link = data.parentStudentLinks.find(
+                      (l) => l.parentUserId === u.id,
+                    );
+                    const student = link
+                      ? data.students.find((s) => s.id === link.studentId)
+                      : null;
+                    return (
+                      <TableRow key={u.id}>
+                        <TableCell className="font-medium text-sm">
+                          {u.username}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {getDisplayName(u)}
+                        </TableCell>
+                        <TableCell className="text-sm">{u.email}</TableCell>
+                        <TableCell className="text-sm">{u.phone}</TableCell>
+                        <TableCell className="text-sm">
+                          {student ? (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] border-emerald-300 text-emerald-700"
+                            >
+                              {student.firstName} {student.lastName}
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-gray-400">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={u.active ? "default" : "secondary"}
+                            className="text-xs"
+                          >
+                            {u.active ? "Aktif" : "Pasif"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedUser(u);
+                                setOpen(true);
+                              }}
+                            >
+                              <Shield size={14} className="mr-1" /> Şifre
+                              Değiştir
+                            </Button>
+                            {canManageUser && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingUser(u);
+                                  setUserForm({
+                                    username: u.username,
+                                    fullName: u.fullName,
+                                    email: u.email,
+                                    phone: u.phone,
+                                    role: u.role,
+                                    schoolId: u.schoolId ?? null,
+                                    active: u.active,
+                                  });
+                                  setSelectedParentStudentId(
+                                    String(link?.studentId ?? ""),
+                                  );
+                                  setFormErrors({});
+                                  setUserFormOpen(true);
+                                }}
+                              >
+                                <Pencil size={14} className="mr-1" /> Düzenle
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
@@ -515,17 +640,61 @@ export function UsersPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(ROLE_LABELS).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>
-                      {v}
-                    </SelectItem>
-                  ))}
+                  {Object.entries(ROLE_LABELS)
+                    .filter(
+                      ([k]) =>
+                        currentUser?.role === "superadmin" || k !== "superadmin",
+                    )
+                    .map(([k, v]) => (
+                      <SelectItem key={k} value={k}>
+                        {v}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
               {formErrors.role && (
                 <p className="text-xs text-red-600">{formErrors.role}</p>
               )}
             </div>
+            {currentUser?.role === "superadmin" && (
+              <div className="space-y-1">
+                <Label className="text-xs">Medrese</Label>
+                <Select
+                  value={userForm.schoolId ? String(userForm.schoolId) : "none"}
+                  onValueChange={(v) =>
+                    setUserForm({
+                      ...userForm,
+                      schoolId: v === "none" ? null : Number(v),
+                    })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Medrese seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Medrese seçilmedi</SelectItem>
+                    {data.schools.map((s) => (
+                      <SelectItem key={s.id} value={String(s.id)}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {(currentUser?.role === "admin" ||
+              currentUser?.role === "authorized_teacher") && (
+              <div className="space-y-1">
+                <Label className="text-xs">Medrese</Label>
+                <Input
+                  value={
+                    data.schools.find((s) => s.id === currentUser.schoolId)
+                      ?.name || "-"
+                  }
+                  disabled
+                />
+              </div>
+            )}
             {userForm.role === "parent" && (
               <div className="space-y-1">
                 <Label className="text-xs">Öğrenciyi Eşleştir *</Label>

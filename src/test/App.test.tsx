@@ -25,7 +25,7 @@ vi.mock('@/app/pages/SchoolsPage.tsx', () => ({ SchoolsPage: () => <div>schools-
 vi.mock('@/app/pages/ClassesPage.tsx', () => ({ ClassesPage: () => <div>classes-page</div> }));
 vi.mock('@/app/pages/LessonsPage.tsx', () => ({ LessonsPage: () => <div>lessons-page</div> }));
 vi.mock('@/app/pages/AttendancePage.tsx', () => ({ AttendancePage: () => <div>attendance-page</div> }));
-vi.mock('@/app/pages/TeacherLessonsPage.tsx', () => ({ TeacherLessonsPage: () => <div>teacher-lessons-page</div> }));
+
 vi.mock('@/app/pages/ProgressPage.tsx', () => ({ ProgressPage: () => <div>progress-page</div> }));
 vi.mock('@/app/pages/CommentsPage.tsx', () => ({ CommentsPage: () => <div>comments-page</div> }));
 vi.mock('@/app/pages/ReportsPage.tsx', () => ({ ReportsPage: () => <div>reports-page</div> }));
@@ -65,11 +65,11 @@ describe('App router', () => {
     expect(screen.getByText('dashboard-page')).toBeTruthy();
   });
 
-  it('redirects teacher users to progress from non-profile routes', async () => {
+  it('redirects teacher users from root to progress', async () => {
     authState.currentUser = { id: 2, role: 'teacher', fullName: 'Teacher User' };
 
     render(
-      <MemoryRouter initialEntries={['/students']}>
+      <MemoryRouter initialEntries={['/']}>
         <AppRouter />
       </MemoryRouter>,
     );

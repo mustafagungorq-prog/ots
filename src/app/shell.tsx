@@ -15,7 +15,6 @@ import {
   UsersRound,
   ClipboardCheck,
   TrendingUp,
-  BookMarked,
   MessageSquare,
   FileText,
   Shield,
@@ -23,9 +22,21 @@ import {
   BookOpen,
   UserCog,
   ListChecks,
+  Archive,
+  KeyRound,
+  Mail,
+  UserCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/hooks/useAuth";
 import { PERMISSIONS, ROLE_COLORS, ROLE_LABELS } from "./constants";
 
@@ -44,11 +55,32 @@ export function useCollapsibleSidebar() {
 export { LoginPage } from "@/app/pages/LoginPage";
 
 export function MainLayout({ children }: { children: ReactNode }) {
-  const { currentUser, logout, hasPermission } = useAuth();
+  const { currentUser, logout, hasPermission, changePassword } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const sidebar = useCollapsibleSidebar();
   const mobileNavRef = useRef<HTMLElement | null>(null);
+  const [pwOpen, setPwOpen] = useState(false);
+  const [newPw, setNewPw] = useState("");
+  const [pwError, setPwError] = useState("");
+
+  const handleChangePassword = async () => {
+    if (!currentUser) return;
+    if (!newPw || newPw.length < 6) {
+      setPwError("Şifre en az 6 karakter olmalıdır");
+      return;
+    }
+    try {
+      await changePassword(currentUser.id, newPw);
+      setPwOpen(false);
+      setNewPw("");
+      setPwError("");
+      alert("Şifreniz başarıyla değiştirildi");
+    } catch (err: any) {
+      setPwError(err?.message || "Şifre değiştirilemedi");
+    }
+  };
+
   const allTabs = [
     {
       id: "dashboard",
@@ -65,6 +97,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
       roles: ["superadmin", "admin", "authorized_teacher", "parent"] as const,
     },
     {
+      id: "archived-students",
+      label: "Arşivli Öğrenciler",
+      icon: Archive,
+      path: "/archived-students",
+      roles: ["superadmin", "admin"] as const,
+    },
+    {
       id: "student-form",
       label: "Öğrenci Ekle",
       icon: Plus,
@@ -79,10 +118,10 @@ export function MainLayout({ children }: { children: ReactNode }) {
       roles: PERMISSIONS.SCHOOL_MANAGE,
     },
     {
-      id: "lessons",
-      label: "Dersler",
+      id: "courses",
+      label: "Kurslar",
       icon: BookOpenCheck,
-      path: "/lessons",
+      path: "/courses",
       roles: PERMISSIONS.LESSON_MANAGE,
     },
     {
@@ -106,13 +145,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
       path: "/progress",
       roles: PERMISSIONS.PROGRESS_CREATE,
     },
-    {
-      id: "teacher-lessons",
-      label: "Öğretmen Dersleri",
-      icon: BookMarked,
-      path: "/teacher-lessons",
-      roles: ["superadmin"] as const,
-    },
+
     {
       id: "comments",
       label: "Yorumlar",
@@ -126,6 +159,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
       icon: FileText,
       path: "/reports",
       roles: PERMISSIONS.REPORT_CREATE,
+    },
+    {
+      id: "bulk-report-mail",
+      label: "Toplu Rapor Mail",
+      icon: Mail,
+      path: "/bulk-report-mail",
+      roles: ["superadmin", "admin", "authorized_teacher", "teacher"] as const,
     },
     {
       id: "permissions",
@@ -175,6 +215,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
       icon: UserCog,
       path: "/users",
       roles: PERMISSIONS.USER_MANAGE,
+    },
+    {
+      id: "pending-approvals",
+      label: "Üyelik Bekleyenler",
+      icon: UserCheck,
+      path: "/pending-approvals",
+      roles: ["superadmin"] as const,
     },
     {
       id: "parent-student-links",
@@ -268,6 +315,15 @@ export function MainLayout({ children }: { children: ReactNode }) {
                 variant="ghost"
                 size="icon"
                 className="h-9 w-9"
+                onClick={() => setPwOpen(true)}
+                title="Şifre Değiştir"
+              >
+                <KeyRound size={18} className="text-gray-500" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
                 onClick={logout}
                 title="Çıkış"
               >
@@ -345,6 +401,34 @@ export function MainLayout({ children }: { children: ReactNode }) {
         )}
         <main className="flex-1 min-w-0 p-3 sm:p-4 lg:p-6">{children}</main>
       </div>
+
+      <Dialog open={pwOpen} onOpenChange={setPwOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Şifre Değiştir</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-4">
+            <div className="space-y-1">
+              <Label className="text-xs">Yeni Şifre</Label>
+              <Input
+                type="password"
+                value={newPw}
+                onChange={(e) => {
+                  setNewPw(e.target.value);
+                  setPwError("");
+                }}
+                placeholder="En az 6 karakter"
+              />
+            </div>
+            {pwError && (
+              <p className="text-xs text-red-600">{pwError}</p>
+            )}
+            <Button onClick={handleChangePassword} className="w-full">
+              Değiştir
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

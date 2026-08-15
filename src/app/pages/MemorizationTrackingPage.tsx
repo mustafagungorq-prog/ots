@@ -9,6 +9,8 @@ import {
   Pencil,
   Trash2,
   Save,
+  Clock,
+  Home,
 } from "lucide-react";
 import { useStudentData } from "@/hooks/useStudentData";
 import { useAuth } from "@/hooks/useAuth";
@@ -48,6 +50,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type LocalStatus = {
   status: MemorizationStatus;
@@ -60,6 +63,8 @@ const STATUS_OPTIONS: MemorizationStatus[] = [
   "failed",
   "repeat_tecvid",
   "repeat_harf",
+  "not_appointment",
+  "home_work",
 ];
 
 const STATUS_LABELS: Record<MemorizationStatus, string> = {
@@ -67,6 +72,8 @@ const STATUS_LABELS: Record<MemorizationStatus, string> = {
   failed: "Kaldı",
   repeat_tecvid: "Tekrarlamalı (Tecvid)",
   repeat_harf: "Tekrarlamalı (Harf)",
+  not_appointment: "Atanmadı",
+  home_work: "Ev Ödevi",
 };
 
 const STATUS_BADGES: Record<MemorizationStatus, string> = {
@@ -74,12 +81,13 @@ const STATUS_BADGES: Record<MemorizationStatus, string> = {
   failed: "bg-red-500",
   repeat_tecvid: "bg-amber-500",
   repeat_harf: "bg-blue-500",
+  not_appointment: "bg-gray-500",
+  home_work: "bg-purple-500",
 };
 
 export function MemorizationTrackingPage() {
   const data = useStudentData();
-  const { hasPermission, currentUser, teacherLessons, refreshTeacherLessons } =
-    useAuth();
+  const { hasPermission, currentUser } = useAuth();
   const canManageTexts = hasPermission(PERMISSIONS.MEMORIZATION_TEXT_MANAGE);
   const isTeacher =
     currentUser?.role === "teacher" ||
@@ -87,6 +95,7 @@ export function MemorizationTrackingPage() {
 
   const [selectedTextId, setSelectedTextId] = useState<string>("");
   const [search, setSearch] = useState("");
+  const [textSearch, setTextSearch] = useState("");
   const [localStatuses, setLocalStatuses] = useState<
     Record<number, LocalStatus>
   >({});
@@ -96,6 +105,7 @@ export function MemorizationTrackingPage() {
   const [selectedLessonFilter, setSelectedLessonFilter] =
     useState<string>("all");
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>("all");
+  const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTextId, setEditingTextId] = useState<number | null>(null);
@@ -105,10 +115,8 @@ export function MemorizationTrackingPage() {
 
   const myLessonIds = useMemo(() => {
     if (!isTeacher || !currentUser) return [];
-    return teacherLessons
-      .filter((t) => t.teacherId === currentUser.id)
-      .map((t) => t.lessonId);
-  }, [isTeacher, currentUser, teacherLessons]);
+    return data.lessons.map((l) => l.id);
+  }, [isTeacher, currentUser, data.lessons]);
 
   const myGroupIds = useMemo(() => {
     if (!isTeacher || !currentUser) return [];
@@ -118,24 +126,8 @@ export function MemorizationTrackingPage() {
   }, [isTeacher, currentUser, data.classRooms]);
 
   const visibleStudents = useMemo(() => {
-    if (!isTeacher || !currentUser) return data.students;
-
-    const lessonStudents =
-      myLessonIds.length > 0
-        ? data.students.filter((s) =>
-            s.lessons.some((lid) => myLessonIds.includes(lid)),
-          )
-        : [];
-    const groupStudents =
-      myGroupIds.length > 0
-        ? data.students.filter((s) => myGroupIds.includes(s.groupId || -1))
-        : [];
-
-    const merged = [...lessonStudents, ...groupStudents];
-    return merged.filter(
-      (s, i, arr) => arr.findIndex((x) => x.id === s.id) === i,
-    );
-  }, [isTeacher, currentUser, data.students, myLessonIds, myGroupIds]);
+    return data.students;
+  }, [data.students]);
 
   const myLessons = useMemo(
     () => data.lessons.filter((l) => myLessonIds.includes(l.id)),
@@ -152,27 +144,35 @@ export function MemorizationTrackingPage() {
     [data.memorizationCriteria],
   );
 
+  const availableGroupsForSelectedLesson = useMemo(() => {
+    if (selectedLessonFilter === "all") return myGroups;
+    const lessonId = Number(selectedLessonFilter);
+    return myGroups.filter((g) => g.lessonIds?.includes(lessonId));
+  }, [selectedLessonFilter, myGroups]);
+
   const assignmentScopedStudents = useMemo(() => {
     if (!isTeacher) return visibleStudents;
 
-    if (assignmentFilterType === "lesson") {
-      if (selectedLessonFilter === "all") {
-        return visibleStudents.filter((s) =>
+    let result = visibleStudents;
+
+    if (assignmentFilterType === "lesson" || assignmentFilterType === "group") {
+      if (selectedLessonFilter !== "all") {
+        const lessonId = Number(selectedLessonFilter);
+        result = result.filter((s) => s.lessons.includes(lessonId));
+      } else if (assignmentFilterType === "lesson" && myLessonIds.length > 0) {
+        result = result.filter((s) =>
           s.lessons.some((lid) => myLessonIds.includes(lid)),
         );
       }
-      const lessonId = Number(selectedLessonFilter);
-      return visibleStudents.filter((s) => s.lessons.includes(lessonId));
-    }
 
-    if (assignmentFilterType === "group") {
-      if (selectedGroupFilter === "all") {
-        return visibleStudents.filter((s) =>
-          myGroupIds.includes(s.groupId || -1),
-        );
+      if (selectedGroupFilter !== "all") {
+        const groupId = Number(selectedGroupFilter);
+        result = result.filter((s) => s.groupId === groupId);
+      } else if (assignmentFilterType === "group" && myGroupIds.length > 0) {
+        result = result.filter((s) => myGroupIds.includes(s.groupId || -1));
       }
-      const groupId = Number(selectedGroupFilter);
-      return visibleStudents.filter((s) => s.groupId === groupId);
+
+      return result;
     }
 
     return visibleStudents;
@@ -191,6 +191,14 @@ export function MemorizationTrackingPage() {
     [data.memorizationTexts, selectedTextId],
   );
 
+  const filteredMemorizationTexts = useMemo(() => {
+    const q = textSearch.trim().toLowerCase();
+    if (!q) return data.memorizationTexts;
+    return data.memorizationTexts.filter((t) =>
+      t.title.toLowerCase().includes(q),
+    );
+  }, [data.memorizationTexts, textSearch]);
+
   const filteredStudents = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return assignmentScopedStudents;
@@ -198,6 +206,10 @@ export function MemorizationTrackingPage() {
       `${s.firstName} ${s.lastName}`.toLowerCase().includes(q),
     );
   }, [assignmentScopedStudents, search]);
+
+  useEffect(() => {
+    setSelectedGroupFilter("all");
+  }, [selectedLessonFilter]);
 
   useEffect(() => {
     if (!selectedTextId) {
@@ -227,7 +239,6 @@ export function MemorizationTrackingPage() {
     data.loadStudents();
     data.loadLessons();
     data.loadClassRooms();
-    refreshTeacherLessons();
     apiGet<{ value?: string }>("system-settings/memorization_mode")
       .then((d) => {
         const mode = d.value as MemorizationMode;
@@ -241,8 +252,7 @@ export function MemorizationTrackingPage() {
     data.loadingMemorizationTracking ||
     data.loadingStudents ||
     data.loadingLessons ||
-    data.loadingClassRooms ||
-    !teacherLessonsLoaded
+    data.loadingClassRooms
   ) {
     return <Loading />;
   }*/
@@ -343,7 +353,7 @@ export function MemorizationTrackingPage() {
     setLocalStatuses((prev) => ({
       ...prev,
       [studentId]: {
-        status: prev[studentId]?.status || "failed",
+        status: prev[studentId]?.status || "not_appointment",
         scores: prev[studentId]?.scores,
         teacherNote,
       },
@@ -353,7 +363,7 @@ export function MemorizationTrackingPage() {
   const saveStudentStatus = (studentId: number) => {
     if (!selectedTextId) return;
     const row = localStatuses[studentId] || {
-      status: "failed" as MemorizationStatus,
+      status: "not_appointment" as MemorizationStatus,
       teacherNote: "",
     };
     data.setMemorizationStatus(
@@ -369,7 +379,7 @@ export function MemorizationTrackingPage() {
     if (!selectedTextId) return;
     filteredStudents.forEach((student) => {
       const row = localStatuses[student.id] || {
-        status: "failed" as MemorizationStatus,
+        status: "not_appointment" as MemorizationStatus,
         teacherNote: "",
       };
       data.setMemorizationStatus(
@@ -380,6 +390,25 @@ export function MemorizationTrackingPage() {
         row.scores,
       );
     });
+  };
+
+  const saveSelectedStatuses = () => {
+    if (!selectedTextId) return;
+    filteredStudents
+      .filter((student) => selectedStudentIds.includes(student.id))
+      .forEach((student) => {
+        const row = localStatuses[student.id] || {
+          status: "not_appointment" as MemorizationStatus,
+          teacherNote: "",
+        };
+        data.setMemorizationStatus(
+          student.id,
+          Number(selectedTextId),
+          row.status,
+          row.teacherNote,
+          row.scores,
+        );
+      });
   };
 
   return (
@@ -441,24 +470,46 @@ export function MemorizationTrackingPage() {
               </div>
 
               {assignmentFilterType === "lesson" && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Ders Seç</Label>
-                  <Select
-                    value={selectedLessonFilter}
-                    onValueChange={setSelectedLessonFilter}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Ders seçin" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Tüm Dersler</SelectItem>
-                      {myLessons.map((lesson) => (
-                        <SelectItem key={lesson.id} value={String(lesson.id)}>
-                          {lesson.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Ders Seç</Label>
+                    <Select
+                      value={selectedLessonFilter}
+                      onValueChange={setSelectedLessonFilter}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Ders seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Tüm Dersler</SelectItem>
+                        {myLessons.map((lesson) => (
+                          <SelectItem key={lesson.id} value={String(lesson.id)}>
+                            {lesson.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Grup Seç</Label>
+                    <Select
+                      value={selectedGroupFilter}
+                      onValueChange={setSelectedGroupFilter}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Grup seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Tüm Gruplar</SelectItem>
+                        {availableGroupsForSelectedLesson.map((group) => (
+                          <SelectItem key={group.id} value={String(group.id)}>
+                            {group.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
 
@@ -487,20 +538,35 @@ export function MemorizationTrackingPage() {
           )}
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Ezber Metni</Label>
-              <Select value={selectedTextId} onValueChange={setSelectedTextId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Metin seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {data.memorizationTexts.map((text) => (
-                    <SelectItem key={text.id} value={String(text.id)}>
-                      {text.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Ezber Metni</Label>
+                <Select value={selectedTextId} onValueChange={setSelectedTextId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Metin seçin" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredMemorizationTexts.map((text) => (
+                      <SelectItem key={text.id} value={String(text.id)}>
+                        {text.title}
+                      </SelectItem>
+                    ))}
+                    {filteredMemorizationTexts.length === 0 && (
+                      <div className="px-2 py-1.5 text-xs text-gray-500">
+                        Sonuç bulunamadı
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Metin Ara</Label>
+                <Input
+                  value={textSearch}
+                  onChange={(e) => setTextSearch(e.target.value)}
+                  placeholder="Ezber metni başlığı ara"
+                />
+              </div>
             </div>
 
             <div className="space-y-1">
@@ -614,7 +680,35 @@ export function MemorizationTrackingPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-xs">Öğrenci</TableHead>
+                    <TableHead className="text-xs">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={
+                            filteredStudents.length > 0 &&
+                            filteredStudents.every((s) =>
+                              selectedStudentIds.includes(s.id),
+                            )
+                          }
+                          onCheckedChange={(checked) => {
+                            setSelectedStudentIds((prev) =>
+                              checked
+                                ? Array.from(
+                                    new Set([
+                                      ...prev,
+                                      ...filteredStudents.map((s) => s.id),
+                                    ]),
+                                  )
+                                : prev.filter(
+                                    (id) =>
+                                      !filteredStudents.some((s) => s.id === id),
+                                  ),
+                            );
+                          }}
+                          aria-label="Tümünü seç"
+                        />
+                        Öğrenci
+                      </div>
+                    </TableHead>
                     {memorizationMode === "simple" ? (
                       <TableHead className="text-xs">Durum</TableHead>
                     ) : (
@@ -630,13 +724,27 @@ export function MemorizationTrackingPage() {
                 <TableBody>
                   {filteredStudents.map((student) => {
                     const row = localStatuses[student.id] || {
-                      status: "failed" as MemorizationStatus,
+                      status: "not_appointment" as MemorizationStatus,
                       teacherNote: "",
                     };
+                    const isSelected = selectedStudentIds.includes(student.id);
                     return (
                       <TableRow key={student.id}>
                         <TableCell className="font-medium text-sm">
-                          {student.firstName} {student.lastName}
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => {
+                                setSelectedStudentIds((prev) =>
+                                  checked
+                                    ? [...prev, student.id]
+                                    : prev.filter((id) => id !== student.id),
+                                );
+                              }}
+                              aria-label={`${student.firstName} ${student.lastName} seç`}
+                            />
+                            {student.firstName} {student.lastName}
+                          </div>
                         </TableCell>
                         {memorizationMode === "simple" ? (
                           <TableCell>
@@ -669,6 +777,12 @@ export function MemorizationTrackingPage() {
                                   )}
                                   {status === "repeat_harf" && (
                                     <Type size={13} className="mr-1" />
+                                  )}
+                                  {status === "not_appointment" && (
+                                    <Clock size={13} className="mr-1" />
+                                  )}
+                                  {status === "home_work" && (
+                                    <Home size={13} className="mr-1" />
                                   )}
                                   {STATUS_LABELS[status]}
                                 </Button>
@@ -760,11 +874,23 @@ export function MemorizationTrackingPage() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <Badge variant="outline" className="w-fit">
               {filteredStudents.length} öğrenci listelendi
+              {selectedStudentIds.length > 0 &&
+                ` · ${selectedStudentIds.length} seçili`}
             </Badge>
-            <Button onClick={saveAllStatuses}>
-              <Save size={16} className="mr-1" />
-              Tümünü Kaydet
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                disabled={selectedStudentIds.length === 0}
+                onClick={saveSelectedStatuses}
+              >
+                <Save size={16} className="mr-1" />
+                Seçilileri Kaydet
+              </Button>
+              <Button onClick={saveAllStatuses}>
+                <Save size={16} className="mr-1" />
+                Tümünü Kaydet
+              </Button>
+            </div>
           </div>
         </>
       )}

@@ -35,6 +35,8 @@ const STATUS_OPTIONS: MemorizationStatus[] = [
   "failed",
   "repeat_tecvid",
   "repeat_harf",
+  "not_appointment",
+  "home_work",
 ];
 
 const STATUS_LABELS: Record<MemorizationStatus, string> = {
@@ -42,6 +44,8 @@ const STATUS_LABELS: Record<MemorizationStatus, string> = {
   failed: "Kaldı",
   repeat_tecvid: "Tekrarlamalı (Tecvid)",
   repeat_harf: "Tekrarlamalı (Harf)",
+  not_appointment: "Atanmadı",
+  home_work: "Ev Ödevi",
 };
 
 const STATUS_BADGES: Record<MemorizationStatus, string> = {
@@ -49,6 +53,8 @@ const STATUS_BADGES: Record<MemorizationStatus, string> = {
   failed: "bg-red-500",
   repeat_tecvid: "bg-amber-500",
   repeat_harf: "bg-blue-500",
+  not_appointment: "bg-gray-500",
+  home_work: "bg-purple-500",
 };
 
 interface StudentMemorizationTrackingPanelProps {
@@ -61,7 +67,7 @@ export function StudentMemorizationTrackingPanel({
   const data = useStudentData();
 
   const [selectedTextId, setSelectedTextId] = useState<string>("");
-  const [status, setStatus] = useState<MemorizationStatus>("failed");
+  const [status, setStatus] = useState<MemorizationStatus>("not_appointment");
   const [teacherNote, setTeacherNote] = useState<string>("");
   const [scores, setScores] = useState<Record<string, number>>({});
   const [memorizationMode, setMemorizationMode] =
@@ -106,7 +112,7 @@ export function StudentMemorizationTrackingPanel({
 
   useEffect(() => {
     if (!selectedTextId) {
-      setStatus("failed");
+      setStatus("not_appointment");
       setTeacherNote("");
       setScores({});
       return;
@@ -116,7 +122,7 @@ export function StudentMemorizationTrackingPanel({
       setTeacherNote(existingRecord.teacherNote || "");
       setScores(existingRecord.scores || {});
     } else {
-      setStatus("failed");
+      setStatus("not_appointment");
       setTeacherNote("");
       setScores({});
     }

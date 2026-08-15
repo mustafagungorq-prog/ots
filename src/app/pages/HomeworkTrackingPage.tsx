@@ -34,10 +34,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export function HomeworkTrackingPage() {
   const data = useStudentData();
-  const { currentUser, teacherLessons, refreshTeacherLessons } = useAuth();
+  const { currentUser } = useAuth();
   const isTeacher =
     currentUser?.role === "teacher" ||
     currentUser?.role === "authorized_teacher";
@@ -50,6 +51,7 @@ export function HomeworkTrackingPage() {
   const [selectedLessonFilter, setSelectedLessonFilter] =
     useState<string>("all");
   const [selectedGroupFilter, setSelectedGroupFilter] = useState<string>("all");
+  const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
 
   useEffect(() => {
     data.loadHomeworkTemplates();
@@ -57,15 +59,16 @@ export function HomeworkTrackingPage() {
     data.loadStudents();
     data.loadLessons();
     data.loadClassRooms();
-    refreshTeacherLessons();
   }, []);
+
+  useEffect(() => {
+    setSelectedGroupFilter("all");
+  }, [selectedLessonFilter]);
 
   const myLessonIds = useMemo(() => {
     if (!isTeacher || !currentUser) return [];
-    return teacherLessons
-      .filter((t) => t.teacherId === currentUser.id)
-      .map((t) => t.lessonId);
-  }, [isTeacher, currentUser, teacherLessons]);
+    return data.lessons.map((l) => l.id);
+  }, [isTeacher, currentUser, data.lessons]);
 
   const myGroupIds = useMemo(() => {
     if (!isTeacher || !currentUser) return [];
@@ -75,24 +78,8 @@ export function HomeworkTrackingPage() {
   }, [isTeacher, currentUser, data.classRooms]);
 
   const visibleStudents = useMemo(() => {
-    if (!isTeacher || !currentUser) return data.students;
-
-    const lessonStudents =
-      myLessonIds.length > 0
-        ? data.students.filter((s) =>
-            s.lessons.some((lid: number) => myLessonIds.includes(lid)),
-          )
-        : [];
-    const groupStudents =
-      myGroupIds.length > 0
-        ? data.students.filter((s) => myGroupIds.includes(s.groupId || -1))
-        : [];
-
-    const merged = [...lessonStudents, ...groupStudents];
-    return merged.filter(
-      (s, i, arr) => arr.findIndex((x) => x.id === s.id) === i,
-    );
-  }, [isTeacher, currentUser, data.students, myLessonIds, myGroupIds]);
+    return data.students;
+  }, [data.students]);
 
   const myLessons = useMemo(
     () => data.lessons.filter((l) => myLessonIds.includes(l.id)),
@@ -104,27 +91,35 @@ export function HomeworkTrackingPage() {
     [data.classRooms, myGroupIds],
   );
 
+  const availableGroupsForSelectedLesson = useMemo(() => {
+    if (selectedLessonFilter === "all") return myGroups;
+    const lessonId = Number(selectedLessonFilter);
+    return myGroups.filter((g) => g.lessonIds?.includes(lessonId));
+  }, [selectedLessonFilter, myGroups]);
+
   const assignmentScopedStudents = useMemo(() => {
     if (!isTeacher) return visibleStudents;
 
-    if (assignmentFilterType === "lesson") {
-      if (selectedLessonFilter === "all") {
-        return visibleStudents.filter((s) =>
+    let result = visibleStudents;
+
+    if (assignmentFilterType === "lesson" || assignmentFilterType === "group") {
+      if (selectedLessonFilter !== "all") {
+        const lessonId = Number(selectedLessonFilter);
+        result = result.filter((s) => s.lessons.includes(lessonId));
+      } else if (assignmentFilterType === "lesson" && myLessonIds.length > 0) {
+        result = result.filter((s) =>
           s.lessons.some((lid: number) => myLessonIds.includes(lid)),
         );
       }
-      const lessonId = Number(selectedLessonFilter);
-      return visibleStudents.filter((s) => s.lessons.includes(lessonId));
-    }
 
-    if (assignmentFilterType === "group") {
-      if (selectedGroupFilter === "all") {
-        return visibleStudents.filter((s) =>
-          myGroupIds.includes(s.groupId || -1),
-        );
+      if (selectedGroupFilter !== "all") {
+        const groupId = Number(selectedGroupFilter);
+        result = result.filter((s) => s.groupId === groupId);
+      } else if (assignmentFilterType === "group" && myGroupIds.length > 0) {
+        result = result.filter((s) => myGroupIds.includes(s.groupId || -1));
       }
-      const groupId = Number(selectedGroupFilter);
-      return visibleStudents.filter((s) => s.groupId === groupId);
+
+      return result;
     }
 
     return visibleStudents;
@@ -138,13 +133,23 @@ export function HomeworkTrackingPage() {
     myGroupIds,
   ]);
 
-  const selectedTemplate = useMemo(
-    () =>
-      data.homeworkTemplates.find(
-        (t) => String(t.id) === selectedTemplateId,
-      ),
-    [data.homeworkTemplates, selectedTemplateId],
-  );
+  const selectedTemplate = useMemo(() => {
+    if (selectedTemplateId === "custom") {
+      return {
+        id: "custom" as const,
+        title: "Diğer (Manuel)",
+        content: "",
+        type: "diger",
+        details: "",
+        active: true,
+      };
+    }
+    return data.homeworkTemplates.find(
+      (t) => String(t.id) === selectedTemplateId,
+    );
+  }, [data.homeworkTemplates, selectedTemplateId]);
+
+  const isCustomTemplate = selectedTemplateId === "custom";
 
   const filteredStudents = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -163,11 +168,19 @@ export function HomeworkTrackingPage() {
     return map;
   }, [data.homeworkAssignments]);
 
-  const getAssignment = (studentId: number) => {
-    if (!selectedTemplateId) return undefined;
-    return studentAssignments[studentId]?.find(
+  const getAssignments = (studentId: number) => {
+    if (!selectedTemplateId) return [];
+    if (isCustomTemplate) {
+      return (
+        studentAssignments[studentId]?.filter(
+          (a) => a.templateId === null || a.templateId === undefined,
+        ) ?? []
+      );
+    }
+    const assignment = studentAssignments[studentId]?.find(
       (a) => String(a.templateId) === selectedTemplateId,
     );
+    return assignment ? [assignment] : [];
   };
 
   const handleAssign = (studentId: number) => {
@@ -192,13 +205,50 @@ export function HomeworkTrackingPage() {
     data.toggleHomeworkCompleted(assignmentId);
   };
 
-  const assignedCount = filteredStudents.filter((s) =>
-    getAssignment(s.id),
-  ).length;
-  const completedCount = filteredStudents.filter((s) => {
-    const a = getAssignment(s.id);
-    return a?.completed;
-  }).length;
+  const handleAssignSelected = () => {
+    if (!selectedTemplate || selectedStudentIds.length === 0) return;
+    selectedStudentIds.forEach((studentId) => {
+      data.addHomeworkAssignment({
+        studentId,
+        templateId: selectedTemplate.id,
+        title: selectedTemplate.title,
+        content: selectedTemplate.content,
+        details: selectedTemplate.details,
+        author: currentUser?.fullName || currentUser?.username || "Öğretmen",
+        completed: false,
+        type: selectedTemplate.type || "diger",
+      });
+    });
+  };
+
+  const handleUnassignSelected = () => {
+    selectedStudentIds.forEach((studentId) => {
+      const assignments = getAssignments(studentId);
+      assignments.forEach((a) => data.deleteHomeworkAssignment(a.id));
+    });
+  };
+
+  const displayRows = useMemo(() => {
+    const rows: {
+      student: (typeof filteredStudents)[number];
+      assignment: (typeof data.homeworkAssignments)[number] | undefined;
+    }[] = [];
+    filteredStudents.forEach((student) => {
+      const assignments = getAssignments(student.id);
+      if (assignments.length > 0) {
+        assignments.forEach((assignment) => {
+          rows.push({ student, assignment });
+        });
+      } else {
+        rows.push({ student, assignment: undefined });
+      }
+    });
+    return rows;
+  }, [filteredStudents, studentAssignments, selectedTemplateId]);
+
+  const assignedCount = displayRows.filter((r) => r.assignment).length;
+  const completedCount = displayRows.filter((r) => r.assignment?.completed)
+    .length;
 
   const activeTemplates = useMemo(
     () => data.homeworkTemplates.filter((t) => t.active ?? true),
@@ -259,24 +309,46 @@ export function HomeworkTrackingPage() {
               </div>
 
               {assignmentFilterType === "lesson" && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Ders Seç</Label>
-                  <Select
-                    value={selectedLessonFilter}
-                    onValueChange={setSelectedLessonFilter}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Ders seçin" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Tüm Dersler</SelectItem>
-                      {myLessons.map((lesson) => (
-                        <SelectItem key={lesson.id} value={String(lesson.id)}>
-                          {lesson.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Ders Seç</Label>
+                    <Select
+                      value={selectedLessonFilter}
+                      onValueChange={setSelectedLessonFilter}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Ders seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Tüm Dersler</SelectItem>
+                        {myLessons.map((lesson) => (
+                          <SelectItem key={lesson.id} value={String(lesson.id)}>
+                            {lesson.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Grup Seç</Label>
+                    <Select
+                      value={selectedGroupFilter}
+                      onValueChange={setSelectedGroupFilter}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Grup seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Tüm Gruplar</SelectItem>
+                        {availableGroupsForSelectedLesson.map((group) => (
+                          <SelectItem key={group.id} value={String(group.id)}>
+                            {group.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               )}
 
@@ -320,6 +392,7 @@ export function HomeworkTrackingPage() {
                       {t.title}
                     </SelectItem>
                   ))}
+                  <SelectItem value="custom">Diğer (Manuel)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -405,24 +478,99 @@ export function HomeworkTrackingPage() {
                 Her öğrenci için ödev ataması yapabilir, tamamlanma durumunu
                 güncelleyebilirsiniz.
               </CardDescription>
+              {selectedTemplate && !isCustomTemplate && (
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={selectedStudentIds.length === 0}
+                    onClick={handleAssignSelected}
+                  >
+                    <Plus size={13} className="mr-1" />
+                    Seçililere Ata
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-red-600 border-red-300"
+                    disabled={selectedStudentIds.length === 0}
+                    onClick={handleUnassignSelected}
+                  >
+                    <Trash2 size={13} className="mr-1" />
+                    Seçilileri Kaldır
+                  </Button>
+                </div>
+              )}
             </CardHeader>
             <CardContent className="p-0 overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-xs">Öğrenci</TableHead>
+                    <TableHead className="text-xs">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={
+                            filteredStudents.length > 0 &&
+                            filteredStudents.every((s) =>
+                              selectedStudentIds.includes(s.id),
+                            )
+                          }
+                          onCheckedChange={(checked) => {
+                            setSelectedStudentIds((prev) =>
+                              checked
+                                ? Array.from(
+                                    new Set([
+                                      ...prev,
+                                      ...filteredStudents.map((s) => s.id),
+                                    ]),
+                                  )
+                                : prev.filter(
+                                    (id) =>
+                                      !filteredStudents.some((s) => s.id === id),
+                                  ),
+                            );
+                          }}
+                          aria-label="Tümünü seç"
+                        />
+                        Öğrenci
+                      </div>
+                    </TableHead>
+                    {isCustomTemplate && (
+                      <TableHead className="text-xs">Ödev</TableHead>
+                    )}
                     <TableHead className="text-xs">Durum</TableHead>
                     <TableHead className="text-xs text-right">İşlem</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredStudents.map((student) => {
-                    const assignment = getAssignment(student.id);
+                  {displayRows.map((row, idx) => {
+                    const { student, assignment } = row;
+                    const isSelected = selectedStudentIds.includes(student.id);
                     return (
-                      <TableRow key={student.id}>
+                      <TableRow
+                        key={`${student.id}-${assignment?.id ?? "none"}-${idx}`}
+                      >
                         <TableCell className="font-medium text-sm">
-                          {student.firstName} {student.lastName}
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => {
+                                setSelectedStudentIds((prev) =>
+                                  checked
+                                    ? [...prev, student.id]
+                                    : prev.filter((id) => id !== student.id),
+                                );
+                              }}
+                              aria-label={`${student.firstName} ${student.lastName} seç`}
+                            />
+                            {student.firstName} {student.lastName}
+                          </div>
                         </TableCell>
+                        {isCustomTemplate && (
+                          <TableCell className="text-xs max-w-[200px] truncate">
+                            {assignment?.title || "-"}
+                          </TableCell>
+                        )}
                         <TableCell>
                           {assignment ? (
                             <div className="flex items-center gap-2">
@@ -480,7 +628,7 @@ export function HomeworkTrackingPage() {
                                   Kaldır
                                 </Button>
                               </>
-                            ) : (
+                            ) : isCustomTemplate ? null : (
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -495,10 +643,10 @@ export function HomeworkTrackingPage() {
                       </TableRow>
                     );
                   })}
-                  {filteredStudents.length === 0 && (
+                  {displayRows.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={3}
+                        colSpan={isCustomTemplate ? 4 : 3}
                         className="text-center py-8 text-gray-500"
                       >
                         Öğrenci bulunamadı
@@ -512,6 +660,8 @@ export function HomeworkTrackingPage() {
 
           <Badge variant="outline" className="w-fit">
             {filteredStudents.length} öğrenci listelendi
+            {selectedStudentIds.length > 0 &&
+              ` · ${selectedStudentIds.length} seçili`}
           </Badge>
         </>
       )}

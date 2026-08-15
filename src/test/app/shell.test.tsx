@@ -62,9 +62,10 @@ describe('shell module', () => {
   it('shows validation error when login form is submitted empty', async () => {
     render(<MemoryRouter><LoginPage /></MemoryRouter>);
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Giriş Yap' })[0]);
+    const form = document.querySelector('form') as HTMLFormElement | null;
+    fireEvent.submit(form!);
 
-    expect(await screen.findByText('Kullanıcı adı ve şifre gereklidir')).toBeTruthy();
+    expect(await screen.findByText('Kullanıcı adı gereklidir')).toBeTruthy();
     expect(authState.login).not.toHaveBeenCalled();
   });
 
@@ -72,8 +73,8 @@ describe('shell module', () => {
     authState.login = vi.fn().mockResolvedValue(true);
     render(<MemoryRouter><LoginPage /></MemoryRouter>);
 
-    const usernameInput = document.querySelector('input[placeholder="Kullanıcı adınız"]') as HTMLInputElement | null;
-    const passwordInput = document.querySelector('input[placeholder="Şifreniz"]') as HTMLInputElement | null;
+    const usernameInput = document.querySelector('input#username') as HTMLInputElement | null;
+    const passwordInput = document.querySelector('input#password') as HTMLInputElement | null;
     const form = document.querySelector('form') as HTMLFormElement | null;
 
     expect(usernameInput).toBeTruthy();

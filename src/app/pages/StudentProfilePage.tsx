@@ -226,15 +226,23 @@ export function StudentProfilePage() {
       .catch(() => setMemorizationMode("simple"));
     data.loadLessonLogs();
     data.loadParentStudentLinks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (
-    isParent &&
-    allowedStudentIds.length > 0 &&
-    !allowedStudentIds.includes(profileId)
-  ) {
-    return <Navigate to="/parent-students" replace />;
-  }
+  useEffect(() => {
+    if (isParent) data.loadParentConsent();
+  }, [isParent, data.loadParentConsent]);
+
+  useEffect(() => {
+    if (!isParent) return;
+    if (data.loadingParentConsent) return;
+    const consented =
+      data.parentConsent?.illuminationConsent &&
+      data.parentConsent?.kvkkConsent;
+    if (!consented) {
+      navigate("/parent-consent", { replace: true });
+    }
+  }, [isParent, data.loadingParentConsent, data.parentConsent, navigate]);
 
   const student = data.students.find((s) => s.id === Number(id));
   const parentsOfStudent = useMemo(() => {
@@ -276,6 +284,40 @@ export function StudentProfilePage() {
   if (data.loadingStudents || data.loadingSchools || data.loadingLessons || data.loadingAttendance || data.loadingProgress || data.loadingComments || data.loadingHomeworkAssignments || data.loadingMemorizationTexts || data.loadingMemorizationTracking || data.loadingStudentReports || data.loadingLessonLogs) {
     return <Loading />;
   }*/
+
+  const summary = data.memorizationSummaries[profileId];
+  const memorizationCounts = summary?.statusCounts ?? {
+    passed: 0,
+    failed: 0,
+    repeat_tecvid: 0,
+    repeat_harf: 0,
+  };
+  const memorizationTotal = summary?.total ?? 0;
+  const memorizationSuccessRate = summary?.successRate ?? 0;
+  const memorizationPassed = summary?.passed ?? 0;
+  const memorizationNeedsRepeat = summary?.needsRepeat ?? [];
+  const memorizationRecent = summary?.recent ?? [];
+
+  const memorizationChartData = useMemo(() => {
+    return [
+      { name: "Geçti", value: memorizationCounts.passed, color: "#22c55e" },
+      { name: "Kaldı", value: memorizationCounts.failed, color: "#ef4444" },
+      { name: "Tekrar (Tecvid)", value: memorizationCounts.repeat_tecvid, color: "#f59e0b" },
+      { name: "Tekrar (Harf)", value: memorizationCounts.repeat_harf, color: "#3b82f6" },
+    ].filter((d) => d.value > 0);
+  }, [memorizationCounts]);
+
+  if (isParent && (!data.loadedParentConsent || data.loadingParentConsent)) {
+    return <Loading />;
+  }
+
+  if (
+    isParent &&
+    allowedStudentIds.length > 0 &&
+    !allowedStudentIds.includes(profileId)
+  ) {
+    return <Navigate to="/parent-students" replace />;
+  }
 
   if (!student) {
     return (
@@ -324,28 +366,6 @@ export function StudentProfilePage() {
       ),
     );
 
-  const summary = data.memorizationSummaries[profileId];
-  const memorizationCounts = summary?.statusCounts ?? {
-    passed: 0,
-    failed: 0,
-    repeat_tecvid: 0,
-    repeat_harf: 0,
-  };
-  const memorizationTotal = summary?.total ?? 0;
-  const memorizationSuccessRate = summary?.successRate ?? 0;
-  const memorizationPassed = summary?.passed ?? 0;
-  const memorizationNeedsRepeat = summary?.needsRepeat ?? [];
-  const memorizationRecent = summary?.recent ?? [];
-
-  const memorizationChartData = useMemo(() => {
-    return [
-      { name: "Geçti", value: memorizationCounts.passed, color: "#22c55e" },
-      { name: "Kaldı", value: memorizationCounts.failed, color: "#ef4444" },
-      { name: "Tekrar (Tecvid)", value: memorizationCounts.repeat_tecvid, color: "#f59e0b" },
-      { name: "Tekrar (Harf)", value: memorizationCounts.repeat_harf, color: "#3b82f6" },
-    ].filter((d) => d.value > 0);
-  }, [memorizationCounts]);
-
   // Ders isleme kayitlari
   const lessonLogs = data.getStudentLessonLogs(student.id);
 
@@ -379,6 +399,51 @@ export function StudentProfilePage() {
         .map((c) => `- ${c.createdAt}: ${c.content}`)
         .join("\n") || "- Yok";
 
+    const memStatusLabel = (s: string) =>
+      s === "passed"
+        ? "Geçti"
+        : s === "repeat_tecvid"
+          ? "Tekrarlamalı (Tecvid)"
+          : s === "repeat_harf"
+            ? "Tekrarlamalı (Harf)"
+            : s === "not_appointment"
+              ? "Atanmadı"
+              : s === "home_work"
+                ? "Ev Ödevi"
+                : "Kaldı";
+
+    const homeworkLines =
+      homeworks.length > 0
+        ? homeworks
+            .map(
+              (h) =>
+                `- ${h.title}: ${h.content || "-"} (${h.completed ? "Tamamlandı" : "Bekliyor"})`,
+            )
+            .join("\n")
+        : "- Henüz ödev atanmamış";
+
+    const memorizationLines =
+      memorizationRecent.length > 0
+        ? memorizationRecent
+            .slice(0, 10)
+            .map(
+              (m) =>
+                `- ${m.textTitle}: ${memStatusLabel(m.status)}${m.teacherNote ? " — " + m.teacherNote : ""}`,
+            )
+            .join("\n")
+        : "- Henüz ezber kaydı yok";
+
+    const lessonLogLines =
+      lessonLogs.length > 0
+        ? lessonLogs
+            .slice(0, 20)
+            .map(
+              (l) =>
+                `- ${l.date} — ${l.category.toUpperCase()}: ${l.topic}${l.subTopic ? " / " + l.subTopic : ""}${l.notes ? " — " + l.notes : ""}`,
+            )
+            .join("\n")
+        : "- Henüz ders işleme kaydı yok";
+
     return [
       `SAYIN ${student.parentName || student.firstName + " " + student.lastName},`,
       "",
@@ -405,6 +470,15 @@ export function StudentProfilePage() {
       "",
       "YOKLAMA:",
       `- Toplam: ${studentAttendance.length}, Mevcut: ${studentAttendance.filter((a) => a.status === "present").length}, İzinli: ${studentAttendance.filter((a) => a.status === "excused").length}, Geç: ${studentAttendance.filter((a) => a.status === "late").length}, Yok: ${studentAttendance.filter((a) => a.status === "absent").length}`,
+      "",
+      "ÖDEVLER:",
+      homeworkLines,
+      "",
+      "EZBERLER:",
+      memorizationLines,
+      "",
+      "İŞLENEN DERSLER:",
+      lessonLogLines,
       "",
       "YORUMLAR:",
       teacherComments,
@@ -433,6 +507,54 @@ export function StudentProfilePage() {
 
     const infoRow = (label: string, value: string) =>
       `<tr><td style="padding:8px 10px;border:1px solid #e5e7eb;background:#f8fafc;width:170px;"><strong>${esc(label)}</strong></td><td style="padding:8px 10px;border:1px solid #e5e7eb;">${esc(value)}</td></tr>`;
+
+    const memStatusLabel = (s: string) =>
+      s === "passed"
+        ? "Geçti"
+        : s === "repeat_tecvid"
+          ? "Tekrarlamalı (Tecvid)"
+          : s === "repeat_harf"
+            ? "Tekrarlamalı (Harf)"
+            : s === "not_appointment"
+              ? "Atanmadı"
+              : s === "home_work"
+                ? "Ev Ödevi"
+                : "Kaldı";
+
+    const sectionTitle = (title: string) =>
+      `<h3 style="margin:16px 0 8px 0;font-size:14px;color:#065f46;">${esc(title)}</h3>`;
+
+    const homeworkHtml =
+      homeworks.length > 0
+        ? `<div style="font-size:13px;line-height:1.6;">${homeworks
+            .map(
+              (h) =>
+                `<div style="margin-bottom:8px;padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#ffffff;"><strong>${esc(h.title)}</strong> <span style="font-size:11px;color:#6b7280;">(${h.completed ? "Tamamlandı" : "Bekliyor"})</span><br/>${esc(h.content || "-")}</div>`,
+            )
+            .join("")}</div>`
+        : "<span>- Henüz ödev atanmamış</span>";
+
+    const memorizationHtml =
+      memorizationRecent.length > 0
+        ? `<div style="font-size:13px;line-height:1.6;">${memorizationRecent
+            .slice(0, 10)
+            .map(
+              (m) =>
+                `<div style="margin-bottom:8px;padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#ffffff;"><strong>${esc(m.textTitle)}</strong> — ${esc(memStatusLabel(m.status))}<br/><span style="color:#6b7280;">${esc(m.teacherNote || "-")}</span></div>`,
+            )
+            .join("")}</div>`
+        : "<span>- Henüz ezber kaydı yok</span>";
+
+    const lessonLogHtml =
+      lessonLogs.length > 0
+        ? `<div style="font-size:13px;line-height:1.6;">${lessonLogs
+            .slice(0, 20)
+            .map(
+              (l) =>
+                `<div style="margin-bottom:8px;padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#ffffff;"><strong>${esc(l.date)} — ${esc(l.category.toUpperCase())}</strong>: ${esc(l.topic)}${l.subTopic ? ` / ${esc(l.subTopic)}` : ""}${l.notes ? `<br/><span style="color:#6b7280;">${esc(l.notes)}</span>` : ""}</div>`,
+            )
+            .join("")}</div>`
+        : "<span>- Henüz ders işleme kaydı yok</span>";
 
     return `
 <!DOCTYPE html>
@@ -469,7 +591,16 @@ export function StudentProfilePage() {
           ${infoRow("Yoklama Özeti", `Toplam: ${studentAttendance.length}, Mevcut: ${studentAttendance.filter((a) => a.status === "present").length}, İzinli: ${studentAttendance.filter((a) => a.status === "excused").length}, Geç: ${studentAttendance.filter((a) => a.status === "late").length}, Yok: ${studentAttendance.filter((a) => a.status === "absent").length}`)}
         </table>
 
-        <h3 style="margin:0 0 8px 0;font-size:14px;color:#065f46;">Öğretmen Yorumları</h3>
+        ${sectionTitle("Ödev Durumu")}
+        ${homeworkHtml}
+
+        ${sectionTitle("Ezber Durumu")}
+        ${memorizationHtml}
+
+        ${sectionTitle("İşlenen Dersler")}
+        ${lessonLogHtml}
+
+        <h3 style="margin:16px 0 8px 0;font-size:14px;color:#065f46;">Öğretmen Yorumları</h3>
         <div style="font-size:13px;line-height:1.5;">${commentsHtml}</div>
 
         <p style="margin:18px 0 0 0;font-size:12px;color:#6b7280;">Bu e-posta 365 Kuran Kuran Mektebi öğrenci takip sistemi tarafından oluşturulmuştur.</p>
@@ -946,13 +1077,18 @@ export function StudentProfilePage() {
                       <TableCell className="text-xs">{l.date}</TableCell>
                       <TableCell>
                         <Badge
-                          className={`text-[10px] text-white ${l.category === "ilmihal" ? "bg-blue-500" : l.category === "adab" ? "bg-green-500" : "bg-purple-500"}`}
+                          className={`text-[10px] text-white ${l.category === "ilmihal" 
+                            ? "bg-blue-500" : l.category === "adab" 
+                            ? "bg-green-500" : l.category === "tecvid"
+                            ? "bg-purple-500" : "bg-gray-500"}`}
                         >
                           {l.category === "ilmihal"
                             ? "İlmihal"
                             : l.category === "adab"
                               ? "Adab"
-                              : "Tecvid"}
+                              : l.category === "tecvid"
+                                ? "Tecvid"
+                                : "Diğer"}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs font-medium">
@@ -1373,21 +1509,28 @@ export function StudentProfilePage() {
                     Durumu
                   </h4>
                   {homeworks.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       {homeworks.map((h) => (
-                        <Badge
+                        <div
                           key={h.id}
-                          variant={h.completed ? "default" : "outline"}
-                          className={`text-xs ${h.completed ? "bg-green-600" : ""}`}
+                          className="rounded-lg border bg-white p-3 space-y-1"
                         >
-                          {h.completed ? "✓" : "○"} {h.title}
-                        </Badge>
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium break-words">
+                              {h.title}
+                            </p>
+                            <Badge
+                              variant={h.completed ? "default" : "outline"}
+                              className={`text-[10px] whitespace-nowrap ${h.completed ? "bg-green-600" : ""}`}
+                            >
+                              {h.completed ? "Tamamlandı" : "Bekliyor"}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-gray-500 break-words whitespace-pre-wrap">
+                            {h.content || "-"}
+                          </p>
+                        </div>
                       ))}
-                      <span className="text-xs text-gray-500 ml-2">
-                        Tamamlanan:{" "}
-                        {homeworks.filter((h) => h.completed).length}/
-                        {homeworks.length}
-                      </span>
                     </div>
                   ) : (
                     <p className="text-sm text-gray-500">
@@ -1396,6 +1539,107 @@ export function StudentProfilePage() {
                   )}
                 </div>
 
+                {/* 5. Ezber Detaylari */}
+                <div className="w-full min-w-0">
+                  <h4 className="font-bold text-sm mb-3 flex items-center gap-2">
+                    <BookMarked size={16} className="text-emerald-600" /> Ezber
+                    Durumu
+                  </h4>
+                  {memorizationRecent.length > 0 ? (
+                    <div className="space-y-2">
+                      {memorizationRecent.slice(0, 10).map((m) => (
+                        <div
+                          key={m.id}
+                          className="rounded-lg border bg-white p-3 space-y-1"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium break-words">
+                              {m.textTitle}
+                            </p>
+                            <Badge
+                              className={`text-[10px] text-white whitespace-nowrap ${
+                                m.status === "passed"
+                                  ? "bg-green-500"
+                                  : m.status === "repeat_tecvid"
+                                    ? "bg-amber-500"
+                                    : m.status === "repeat_harf"
+                                      ? "bg-blue-500"
+                                      : m.status === "not_appointment"
+                                        ? "bg-gray-500"
+                                        : m.status === "home_work"
+                                          ? "bg-purple-500"
+                                          : "bg-red-500"
+                              }`}
+                            >
+                              {m.status === "passed"
+                                ? "Geçti"
+                                : m.status === "repeat_tecvid"
+                                  ? "Tekrarlamalı (Tecvid)"
+                                  : m.status === "repeat_harf"
+                                    ? "Tekrarlamalı (Harf)"
+                                    : m.status === "not_appointment"
+                                      ? "Atanmadı"
+                                      : m.status === "home_work"
+                                        ? "Ev Ödevi"
+                                        : "Kaldı"}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-gray-500 break-words">
+                            {m.teacherNote || "-"}
+                          </p>
+                          <p className="text-[10px] text-gray-400">
+                            {m.checkedAt || m.updatedAt || "-"}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">
+                      Henüz ezber kaydı yok
+                    </p>
+                  )}
+                </div>
+
+                {/* 6. Islenen Dersler */}
+                <div className="w-full min-w-0">
+                  <h4 className="font-bold text-sm mb-3 flex items-center gap-2">
+                    <BookOpenCheck size={16} className="text-emerald-600" />{" "}
+                    İşlenen Dersler
+                  </h4>
+                  {lessonLogs.length > 0 ? (
+                    <div className="space-y-2">
+                      {lessonLogs.slice(0, 20).map((l) => (
+                        <div
+                          key={l.id}
+                          className="rounded-lg border bg-white p-3 space-y-1"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium break-words">
+                              {l.category.toUpperCase()} — {l.topic}
+                            </p>
+                            <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                              {l.date}
+                            </span>
+                          </div>
+                          {l.subTopic && (
+                            <p className="text-xs text-gray-600 break-words">
+                              {l.subTopic}
+                            </p>
+                          )}
+                          {l.notes && (
+                            <p className="text-xs text-gray-500 break-words">
+                              {l.notes}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">
+                      Henüz ders işleme kaydı yok
+                    </p>
+                  )}
+                </div>
 
                 {/* Alt bilgi */}
                 <div className="border-t pt-4 text-center text-xs text-gray-400">
@@ -1789,7 +2033,19 @@ export function StudentProfilePage() {
                             </TableCell>
                             <TableCell>
                               <Badge
-                                className={`text-[10px] text-white ${m.status === "passed" ? "bg-green-500" : m.status === "repeat_tecvid" ? "bg-amber-500" : m.status === "repeat_harf" ? "bg-blue-500" : "bg-red-500"}`}
+                                className={`text-[10px] text-white ${
+                                  m.status === "passed"
+                                    ? "bg-green-500"
+                                    : m.status === "repeat_tecvid"
+                                      ? "bg-amber-500"
+                                      : m.status === "repeat_harf"
+                                        ? "bg-blue-500"
+                                        : m.status === "not_appointment"
+                                          ? "bg-gray-500"
+                                          : m.status === "home_work"
+                                            ? "bg-purple-500"
+                                            : "bg-red-500"
+                                }`}
                               >
                                 {m.status === "passed"
                                   ? "Geçti"
@@ -1797,7 +2053,11 @@ export function StudentProfilePage() {
                                     ? "Tekrarlamalı (Tecvid)"
                                     : m.status === "repeat_harf"
                                       ? "Tekrarlamalı (Harf)"
-                                      : "Kaldı"}
+                                      : m.status === "not_appointment"
+                                        ? "Atanmadı"
+                                        : m.status === "home_work"
+                                          ? "Ev Ödevi"
+                                          : "Kaldı"}
                               </Badge>
                             </TableCell>
                             <TableCell className="text-xs text-gray-500">

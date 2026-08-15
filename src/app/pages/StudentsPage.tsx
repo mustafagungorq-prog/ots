@@ -17,6 +17,7 @@ import {
   Plus,
   Pencil,
   Trash2,
+  Archive,
   CheckCircle2,
   TrendingUp,
   Send,
@@ -705,7 +706,7 @@ export function StudentsPage() {
                   <TableHead className="text-xs">Memleket</TableHead>
                 )}
                 {canViewColumn("students", "lessons") && (
-                  <TableHead className="text-xs">Dersler</TableHead>
+                  <TableHead className="text-xs">Kurslar</TableHead>
                 )}
                 {canViewColumn("students", "actions") && (
                   <TableHead className="text-xs">İşlem</TableHead>
@@ -809,9 +810,29 @@ export function StudentsPage() {
                               className="h-8 w-8"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (confirm("Silinsin mi?"))
+                                if (confirm("Öğrenci arşivlensin mi?"))
+                                  data.updateStudent(s.id, { archived: true });
+                              }}
+                              title="Arşivle"
+                            >
+                              <Archive size={14} className="text-amber-500" />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (
+                                  confirm(
+                                    "Öğrenci kalıcı olarak silinecek. Emin misiniz?",
+                                  )
+                                )
                                   data.deleteStudent(s.id);
                               }}
+                              title="Sil"
                             >
                               <Trash2 size={14} className="text-red-500" />
                             </Button>

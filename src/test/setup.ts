@@ -38,6 +38,19 @@ if (!globalThis.sessionStorage) {
   });
 }
 
+if (!globalThis.ResizeObserver) {
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    value: vi.fn(function () {
+      return {
+        observe: vi.fn(),
+        unobserve: vi.fn(),
+        disconnect: vi.fn(),
+      };
+    }),
+    configurable: true,
+  });
+}
+
 beforeEach(() => {
   globalThis.localStorage?.clear();
   globalThis.sessionStorage?.clear();

@@ -30,12 +30,12 @@ interface BulkProgressTableProps {
   saved?: boolean;
 }
 
-const PAGE_SIZE_OPTIONS = [25, 50, 100];
+const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500];
 const COLUMNS: { key: keyof BulkDataRow; label: string; width: string }[] = [
   { key: "kp", label: "K.Ok", width: "w-20" },
-  { key: "kc", label: "K.Son", width: "w-20" },
+  { key: "kc", label: "Kuran Son", width: "w-20" },
   { key: "rp", label: "R.Ok", width: "w-20" },
-  { key: "rc", label: "R.Son", width: "w-20" },
+  { key: "rc", label: "Risale Son", width: "w-20" },
   { key: "ec", label: "Elif.Son", width: "w-20" },
   { key: "note", label: "Not", width: "w-44" },
 ];
@@ -54,6 +54,7 @@ function getLastValue(
   sid: number,
   field: keyof BulkDataRow,
 ): string | undefined {
+  if (field === "kp" || field === "rp") return "0"; // these are new values, not last progress
   const p = lastProgress?.[sid];
   if (!p) return undefined;
   const v = p[LAST_PROGRESS_FIELD[field]];
@@ -339,6 +340,7 @@ export function BulkProgressTable({
                           type={isNote ? "text" : "number"}
                           data-row-index={rowIndex}
                           data-col-index={dataColIndex}
+                          disabled={c.key === "kc" || c.key === "rc"}
                           value={d[c.key] ?? getLastValue(lastProgress, s.id, c.key) ?? ""}
                           onChange={(e) => onUpdate(s.id, c.key, e.target.value)}
                           onKeyDown={(e) => handleKeyDown(e, rowIndex, dataColIndex)}

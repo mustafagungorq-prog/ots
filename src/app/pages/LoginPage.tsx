@@ -1,18 +1,29 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
-import { Eye, EyeOff, Clock, User, Lock, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Clock, User, Lock, Mail, Loader2, UserPlus, Smartphone, UserCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/hooks/useAuth";
+import { apiPost } from "@/hooks/useApi";
 
 export function LoginPage() {
-  const { login, sessionExpired, clearSessionExpired, loading } = useAuth();
+  const { login, registerParent, sessionExpired, clearSessionExpired, loading } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
+  const [forgot, setForgot] = useState(false);
+  const [signup, setSignup] = useState(false);
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("05");
+  const [fullName, setFullName] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMsg, setForgotMsg] = useState("");
+  const [signupMsg, setSignupMsg] = useState("");
 
   useEffect(() => {
     return () => {
@@ -20,16 +31,97 @@ export function LoginPage() {
     };
   }, [clearSessionExpired]);
 
+  const handlePhoneChange = (value: string) => {
+    const digits = value.replace(/\D/g, "");
+    let body = digits;
+    if (body.startsWith("05")) {
+      body = body.slice(2);
+    }
+    body = body.slice(0, 9);
+    setPhone("05" + body);
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
-    if (!username || !password) {
-      setError("Kullanıcı adı ve şifre gereklidir");
+    setForgotMsg("");
+    setSignupMsg("");
+    if (signup) {
+      if (!identifier) {
+        setError("Kullanıcı adı gereklidir");
+        return;
+      }
+      if (!fullName) {
+        setError("Ad soyad gereklidir");
+        return;
+      }
+      if (!phone) {
+        setError("Telefon numarası gereklidir");
+        return;
+      }
+      if (!password || password.length < 6) {
+        setError("Şifre en az 6 karakter olmalıdır");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError("Şifreler uyuşmuyor");
+        return;
+      }
+      try {
+        const res = await registerParent({
+          username: identifier,
+          fullName,
+          email,
+          phone,
+          password,
+        });
+        if (res.token && res.user) {
+          navigate("/");
+          return;
+        }
+        setSignupMsg(res.message || "Üyeliğiniz onay için alındı.");
+        setIdentifier("");
+        setPassword("");
+        setConfirmPassword("");
+        setFullName("");
+        setEmail("");
+        setPhone("05");
+      } catch (err: any) {
+        setError(err.message || "Kayıt başarısız oldu");
+      }
       return;
     }
-    const ok = await login(username, password);
+    if (forgot) {
+      if (!email) {
+        setError("E-posta adresi gereklidir");
+        return;
+      }
+      setForgotLoading(true);
+      try {
+        const res = await apiPost<{ message?: string }>("auth/forgot-password", {
+          username: identifier,
+          email,
+        });
+        setForgotMsg(res.message || "İsteğiniz alındı.");
+        setEmail("");
+      } catch (err: any) {
+        setError(err.message || "İşlem başarısız oldu");
+      } finally {
+        setForgotLoading(false);
+      }
+      return;
+    }
+    if (!identifier) {
+      setError("Kullanıcı adı gereklidir");
+      return;
+    }
+    if (!password) {
+      setError("Şifre gereklidir");
+      return;
+    }
+    const ok = await login(identifier, password);
     if (ok) navigate("/");
-    else setError("Geçersiz kullanıcı adı veya şifre");
+    else setError("Geçersiz kullanıcı adı, e-posta, telefon veya şifre");
   };
 
   return (
@@ -110,7 +202,9 @@ export function LoginPage() {
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="username">Kullanıcı Adı</Label>
+                <Label htmlFor="username">
+                  {signup ? "Kullanıcı Adı" : "Kullanıcı Adı / E-posta / Telefon"}
+                </Label>
                 <div className="relative">
                   <User
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
@@ -118,41 +212,162 @@ export function LoginPage() {
                   />
                   <Input
                     id="username"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Kullanıcı adınız"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder={
+                      signup
+                        ? "Kullanıcı adınız"
+                        : "Kullanıcı adı, e-posta veya telefon"
+                    }
                     className="pl-10 h-11"
                     autoComplete="username"
                   />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="password">Şifre</Label>
-                <div className="relative">
-                  <Lock
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    size={18}
-                  />
-                  <Input
-                    id="password"
-                    type={showPw ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Şifreniz"
-                    className="pl-10 pr-10 h-11"
-                    autoComplete="current-password"
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
-                    onClick={() => setShowPw(!showPw)}
-                    tabIndex={-1}
-                  >
-                    {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
+              {signup && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="fullName">Ad Soyad</Label>
+                    <div className="relative">
+                      <UserCircle
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                        size={18}
+                      />
+                      <Input
+                        id="fullName"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="Adınız ve soyadınız"
+                        className="pl-10 h-11"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Telefon Numarası</Label>
+                    <div className="relative">
+                      <Smartphone
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                        size={18}
+                      />
+                      <Input
+                        id="phone"
+                        type="tel"
+                        value={phone}
+                        onChange={(e) => handlePhoneChange(e.target.value)}
+                        placeholder="05XXXXXXXXX"
+                        className="pl-10 h-11"
+                        autoComplete="tel"
+                        maxLength={11}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Öğrenci kaydındaki veli telefonu ile eşleşirse otomatik
+                      onaylanır.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {!forgot && (
+                <div className="space-y-2">
+                  <Label htmlFor="password">Şifre</Label>
+                  <div className="relative">
+                    <Lock
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                      size={18}
+                    />
+                    <Input
+                      id="password"
+                      type={showPw ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Şifreniz"
+                      className="pl-10 pr-10 h-11"
+                      autoComplete={signup ? "new-password" : "current-password"}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
+                      onClick={() => setShowPw(!showPw)}
+                      tabIndex={-1}
+                    >
+                      {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {signup && (
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Şifre Tekrar</Label>
+                  <div className="relative">
+                    <Lock
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                      size={18}
+                    />
+                    <Input
+                      id="confirmPassword"
+                      type={showPw ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Şifrenizi tekrar girin"
+                      className="pl-10 pr-10 h-11"
+                      autoComplete="new-password"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
+                      onClick={() => setShowPw(!showPw)}
+                      tabIndex={-1}
+                    >
+                      {showPw ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {(forgot || signup) && (
+                <div className="space-y-2">
+                  <Label htmlFor="email">E-posta Adresi</Label>
+                  <div className="relative">
+                    <Mail
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                      size={18}
+                    />
+                    <Input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="ornek@mektebtakip.com"
+                      className="pl-10 h-11"
+                      autoComplete="email"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {!signup && (
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="forgot"
+                    checked={forgot}
+                    onCheckedChange={(checked) => {
+                      setForgot(checked === true);
+                      setError("");
+                      setForgotMsg("");
+                    }}
+                  />
+                  <Label
+                    htmlFor="forgot"
+                    className="text-sm font-medium leading-none cursor-pointer"
+                  >
+                    Şifremi unuttum
+                  </Label>
+                </div>
+              )}
 
               {sessionExpired && (
                 <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-700 flex items-start gap-2">
@@ -171,17 +386,46 @@ export function LoginPage() {
                 </div>
               )}
 
+              {forgotMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
+                  {forgotMsg}
+                </div>
+              )}
+
+              {signupMsg && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">
+                  {signupMsg}
+                </div>
+              )}
+
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={loading || forgotLoading}
                 className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-base transition-colors"
               >
-                {loading && (
+                {(loading || forgotLoading) && (
                   <Loader2 className="mr-2 animate-spin" size={18} />
                 )}
-                Giriş Yap
+                {forgot ? "Şifre Gönder" : signup ? "Üye Ol" : "Giriş Yap"}
               </Button>
             </form>
+
+            <div className="mt-5 text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setSignup(!signup);
+                  setForgot(false);
+                  setError("");
+                  setForgotMsg("");
+                  setSignupMsg("");
+                }}
+                className="text-sm text-emerald-700 hover:text-emerald-800 font-medium inline-flex items-center gap-1"
+              >
+                <UserPlus size={16} />
+                {signup ? "Giriş yap" : "Veli üye ol"}
+              </button>
+            </div>
           </div>
 
           <p className="text-center text-gray-400 text-xs mt-6">

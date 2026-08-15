@@ -171,7 +171,7 @@ function getMonthName(key: string) {
 // ====== LESSONS PAGE (2 Grid) ======
 export function LessonsPage() {
   const data = useStudentData();
-  const { canViewColumn, users, usersLoaded, refreshUsers } = useAuth();
+  const { canViewColumn, users, usersLoaded, refreshUsers, currentUser } = useAuth();
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CourseSchedule | null>(null);
@@ -203,10 +203,6 @@ export function LessonsPage() {
     return <Loading />;
   }*/
 
-  // Sistemdeki ogretmen listesi (combobox icin)
-  const teachers = users.filter(
-    (u) => u.role === "teacher" || u.role === "authorized_teacher",
-  );
   const grades = useMemo(
     () => Array.from(new Set(data.students.map((s) => s.grade))).sort(),
     [data.students],
@@ -222,7 +218,6 @@ export function LessonsPage() {
     const payload = {
       ...form,
       courseId: Number(form.courseId),
-      teacherId: form.teacherId ? Number(form.teacherId) : null,
       classRoomId: form.classRoomId ? Number(form.classRoomId) : null,
     };
     if (editing) data.updateCourseSchedule(editing.id, payload);
@@ -298,16 +293,18 @@ export function LessonsPage() {
       <div className="flex justify-between items-center">
         <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Ders Planları</h2>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setEditingCourse(null);
-              setCourseForm({});
-              setCourseOpen(true);
-            }}
-          >
-            <BookMarked size={18} className="mr-1" /> Kurs Yönetimi
-          </Button>
+          {currentUser?.role === "superadmin" && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditingCourse(null);
+                setCourseForm({});
+                setCourseOpen(true);
+              }}
+            >
+              <BookMarked size={18} className="mr-1" /> Kurs Yönetimi
+            </Button>
+          )}
           <Button
             onClick={() => {
               setEditing(null);
@@ -340,9 +337,6 @@ export function LessonsPage() {
               <TableRow>
                 {canViewColumn("lessons", "name") && (
                   <TableHead className="text-xs">Kurs</TableHead>
-                )}
-                {canViewColumn("lessons", "teacher") && (
-                  <TableHead className="text-xs">Öğretmen</TableHead>
                 )}
                 {canViewColumn("lessons", "classRoom") && (
                   <TableHead className="text-xs">Sınıf</TableHead>
@@ -378,9 +372,6 @@ export function LessonsPage() {
                       <TableCell className="font-medium text-sm">
                         {s.name}
                       </TableCell>
-                    )}
-                    {canViewColumn("lessons", "teacher") && (
-                      <TableCell className="text-sm">{s.teacher}</TableCell>
                     )}
                     {canViewColumn("lessons", "classRoom") && (
                       <TableCell className="text-sm">{classRoom?.name || "-"}</TableCell>
@@ -576,25 +567,6 @@ export function LessonsPage() {
               </Select>
             </div>
             <div className="space-y-1">
-              <Label className="text-xs">Öğretmen</Label>
-              <Select
-                value={String(form.teacherId || "")}
-                onValueChange={(v) => setForm({ ...form, teacherId: v ? Number(v) : null })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Öğretmen seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Seçilmedi</SelectItem>
-                  {teachers.map((t) => (
-                    <SelectItem key={t.id} value={String(t.id)}>
-                      {t.fullName || t.username}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
               <Label className="text-xs">Sınıf</Label>
               <Select
                 value={String(form.classRoomId || "")}
@@ -676,6 +648,27 @@ export function LessonsPage() {
                 value={courseForm.description || ""}
                 onChange={(e) => setCourseForm({ ...courseForm, description: e.target.value })}
               />
+              <Select
+                value={courseForm.schoolId ? String(courseForm.schoolId) : "none"}
+                onValueChange={(v) =>
+                  setCourseForm({
+                    ...courseForm,
+                    schoolId: v === "none" ? null : Number(v),
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Medrese seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Medrese seçin</SelectItem>
+                  {data.schools.map((s) => (
+                    <SelectItem key={s.id} value={String(s.id)}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <div className="flex gap-2">
                 <Button onClick={handleCourseSubmit}>
                   {editingCourse ? "Güncelle" : "Ekle"}
@@ -692,6 +685,7 @@ export function LessonsPage() {
                 <TableRow>
                   <TableHead>Kurs</TableHead>
                   <TableHead>Açıklama</TableHead>
+                  <TableHead>Medrese</TableHead>
                   <TableHead>İşlem</TableHead>
                 </TableRow>
               </TableHeader>
@@ -700,6 +694,9 @@ export function LessonsPage() {
                   <TableRow key={c.id}>
                     <TableCell className="font-medium text-sm">{c.name}</TableCell>
                     <TableCell className="text-sm text-gray-500">{c.description || "-"}</TableCell>
+                    <TableCell className="text-sm text-gray-500">
+                      {data.schools.find((s) => s.id === c.schoolId)?.name || "-"}
+                    </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
                         <Button variant="ghost" size="icon" onClick={() => { setEditingCourse(c); setCourseForm(c); }}>

@@ -170,7 +170,7 @@ function getMonthName(key: string) {
 // ====== STUDENT FORM PAGE ======
 export function StudentFormPage() {
   const data = useStudentData();
-  const { canViewTC } = useAuth();
+  const { canViewTC, currentUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { id } = useParams();
@@ -204,17 +204,48 @@ export function StudentFormPage() {
 */
   const currentYear = new Date().getFullYear();
 
+  const isSuperadmin = currentUser?.role === "superadmin";
+  const isSchoolScoped =
+    currentUser?.role === "admin" || currentUser?.role === "authorized_teacher";
+
+  const defaultSchool = useMemo(() => {
+    if (isEdit && student) {
+      const name =
+        student.schoolName ||
+        data.schools.find((s) => s.id === student.schoolId)?.name ||
+        "";
+      return { id: student.schoolId, name };
+    }
+    if (isSchoolScoped && currentUser?.schoolId) {
+      const name =
+        data.schools.find((s) => s.id === currentUser.schoolId)?.name || "";
+      return { id: currentUser.schoolId, name };
+    }
+    return { id: undefined as number | undefined, name: "" };
+  }, [isEdit, student, currentUser, data.schools, isSchoolScoped]);
+
+  const formatPhone = (value: string) => {
+    const digits = value.replace(/\D/g, "");
+    let body = digits;
+    if (body.startsWith("05")) {
+      body = body.slice(2);
+    }
+    body = body.slice(0, 9);
+    return "05" + body;
+  };
+
   const [form, setForm] = useState({
     tcKimlik: student?.tcKimlik || "",
     firstName: student?.firstName || "",
     lastName: student?.lastName || "",
     birthYear: student?.birthYear || (undefined as number | undefined),
     city: student?.city || "",
-    schoolName: student?.schoolName || "",
+    schoolId: defaultSchool.id,
+    schoolName: defaultSchool.name,
     grade: student?.grade || "",
-    phone: student?.phone || "",
+    phone: formatPhone(student?.phone || ""),
     parentName: student?.parentName || "",
-    parentPhone: student?.parentPhone || "",
+    parentPhone: formatPhone(student?.parentPhone || ""),
     email: student?.email || "",
     lessons: student?.lessons || ([] as number[]),
     groupId: student?.groupId || (undefined as number | undefined),
@@ -223,6 +254,23 @@ export function StudentFormPage() {
   const computedAge = form.birthYear ? currentYear - form.birthYear : undefined;
 
   // Düzenleme modunda ogrenci verisi geldiginde formu ve anket cevaplarini doldur
+  // School-scoped users start with their own school once schools are loaded.
+  useEffect(() => {
+    if (!isEdit && isSchoolScoped && defaultSchool.id && !form.schoolId) {
+      setForm((f) => ({
+        ...f,
+        schoolId: defaultSchool.id,
+        schoolName: defaultSchool.name,
+      }));
+    }
+  }, [isEdit, isSchoolScoped, defaultSchool.id, defaultSchool.name, form.schoolId]);
+
+  const availableCourses = useMemo(() => {
+    if (!isSuperadmin) return data.lessons;
+    if (!form.schoolId) return [];
+    return data.lessons.filter((l) => l.schoolId === form.schoolId);
+  }, [isSuperadmin, form.schoolId, data.lessons]);
+
   useEffect(() => {
     if (isEdit && student) {
       const resolvedSchoolName =
@@ -236,11 +284,12 @@ export function StudentFormPage() {
         lastName: student.lastName || "",
         birthYear: student.birthYear || undefined,
         city: student.city || "",
+        schoolId: student.schoolId,
         schoolName: resolvedSchoolName,
         grade: student.grade || "",
-        phone: student.phone || "",
+        phone: formatPhone(student.phone || ""),
         parentName: student.parentName || "",
-        parentPhone: student.parentPhone || "",
+        parentPhone: formatPhone(student.parentPhone || ""),
         email: student.email || "",
         lessons: student.lessons || [],
         groupId: student.groupId || undefined,
@@ -318,19 +367,32 @@ export function StudentFormPage() {
     setError("");
     const autoAge = currentYear - Number(form.birthYear);
 
-    // Okul adını mevcut okullarla eşleştir, yoksa yeni okul oluştur
-    let schoolId = data.schools.find(
-      (s) =>
-        s.name.toLowerCase().trim() === form.schoolName.toLowerCase().trim(),
-    )?.id;
+    let schoolId: number | undefined;
+    let schoolName = form.schoolName.trim();
+
+    if (isSchoolScoped) {
+      if (!currentUser?.schoolId) {
+        setError("Hesabınıza medrese atanmamış");
+        return;
+      }
+      schoolId = currentUser.schoolId;
+      schoolName =
+        data.schools.find((s) => s.id === currentUser.schoolId)?.name ||
+        schoolName;
+    } else {
+      // Superadmin: mevcut okullardan seçmeli
+      schoolId = form.schoolId;
+      if (!schoolId) {
+        setError("Lütfen bir medrese seçin");
+        return;
+      }
+      schoolName =
+        data.schools.find((s) => s.id === schoolId)?.name || schoolName;
+    }
+
     if (!schoolId) {
-      const newSchool = data.addSchool({
-        name: form.schoolName.trim(),
-        address: "",
-        phone: "",
-        principalName: "",
-      });
-      schoolId = newSchool.id;
+      setError("Medrese bilgisi belirlenemedi");
+      return;
     }
 
     const p = {
@@ -338,7 +400,7 @@ export function StudentFormPage() {
       age: autoAge,
       birthYear: Number(form.birthYear),
       schoolId: Number(schoolId),
-      schoolName: form.schoolName.trim(),
+      schoolName,
       groupId: form.groupId || undefined,
     };
     try {
@@ -473,20 +535,48 @@ export function StudentFormPage() {
               <div className="space-y-1">
                 <Label className="text-xs">Sınıf *</Label>
                 <Input
+                  type="number"
                   value={form.grade}
                   onChange={(e) => setForm({ ...form, grade: e.target.value })}
-                  placeholder="örn: 6. Sınıf"
+                  placeholder="örn: 6"
                 />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Medrese *</Label>
-                <Input
-                  value={form.schoolName || student?.schoolName}
-                  onChange={(e) =>
-                    setForm({ ...form, schoolName: e.target.value })
-                  }
-                  placeholder="Medrese adı yazın"
-                />
+                {isSuperadmin ? (
+                  <Select
+                    value={form.schoolId ? String(form.schoolId) : ""}
+                    onValueChange={(v) => {
+                      const id = Number(v);
+                      const name =
+                        data.schools.find((s) => s.id === id)?.name || "";
+                      setForm((f) => ({
+                        ...f,
+                        schoolId: id,
+                        schoolName: name,
+                        // Seçilen medrese değişince kurs seçimini sıfırla
+                        lessons: isEdit ? f.lessons : [],
+                      }));
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Medrese seçin" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {data.schools.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <Input
+                    value={form.schoolName}
+                    disabled
+                    placeholder="Medrese adı"
+                  />
+                )}
               </div>
             </div>
             <div className="space-y-1">
@@ -520,7 +610,12 @@ export function StudentFormPage() {
                 <Label className="text-xs">Öğrenci Tel</Label>
                 <Input
                   value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  placeholder="05XXXXXXXXX"
+                  type="tel"
+                  maxLength={11}
+                  onChange={(e) =>
+                    setForm({ ...form, phone: formatPhone(e.target.value) })
+                  }
                 />
               </div>
               <div className="space-y-1">
@@ -544,28 +639,37 @@ export function StudentFormPage() {
               <Label className="text-xs">Veli Telefon</Label>
               <Input
                 value={form.parentPhone}
+                placeholder="05XXXXXXXXX"
+                type="tel"
+                maxLength={11}
                 onChange={(e) =>
-                  setForm({ ...form, parentPhone: e.target.value })
+                  setForm({ ...form, parentPhone: formatPhone(e.target.value) })
                 }
               />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Kurslar</Label>
-              <div className="flex flex-wrap gap-2">
-                {data.lessons.map((l) => (
-                  <Button
-                    key={l.id}
-                    type="button"
-                    size="sm"
-                    variant={
-                      form.lessons.includes(l.id) ? "default" : "outline"
-                    }
-                    onClick={() => toggleLesson(l.id)}
-                  >
-                    {l.name}
-                  </Button>
-                ))}
-              </div>
+              {isSuperadmin && !form.schoolId ? (
+                <p className="text-xs text-gray-500">
+                  Kurs atamak için önce bir medrese seçin.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {availableCourses.map((l) => (
+                    <Button
+                      key={l.id}
+                      type="button"
+                      size="sm"
+                      variant={
+                        form.lessons.includes(l.id) ? "default" : "outline"
+                      }
+                      onClick={() => toggleLesson(l.id)}
+                    >
+                      {l.name}
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
             {error && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">

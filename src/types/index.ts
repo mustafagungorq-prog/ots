@@ -9,7 +9,8 @@ export interface User {
   email: string;
   phone: string;
   active: boolean;
-  assignedLessons?: number[];
+  approved?: boolean;
+  schoolId?: number | null;
   linkedStudentIds?: number[];
 }
 
@@ -31,6 +32,7 @@ export interface Student {
   lessons: number[];
   groupId?: number | null;
   assignedSurveys?: number[];
+  archived?: boolean;
   createdAt: string;
 }
 
@@ -47,6 +49,7 @@ export interface Course {
   id: number;
   name: string;
   description?: string;
+  schoolId?: number | null;
   active: boolean;
   createdAt?: string;
 }
@@ -144,7 +147,9 @@ export type MemorizationStatus =
   | "passed"
   | "failed"
   | "repeat_tecvid"
-  | "repeat_harf";
+  | "repeat_harf"
+  | "not_appointment"
+  | "home_work";
 
 export interface MemorizationCriteria {
   id: number;
@@ -291,6 +296,7 @@ export interface GridColumnPermission {
 }
 
 export const DEFAULT_GRID_COLUMN_PERMISSIONS: GridColumnPermission[] = [
+  // Öğrenciler
   { gridId: 'students', columnKey: 'firstName', columnLabel: 'Ad Soyad', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher', 'parent'] },
   { gridId: 'students', columnKey: 'tcKimlik', columnLabel: 'TC Kimlik', allowedRoles: ['superadmin'] },
   { gridId: 'students', columnKey: 'grade', columnLabel: 'Sinif', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher', 'parent'] },
@@ -300,6 +306,54 @@ export const DEFAULT_GRID_COLUMN_PERMISSIONS: GridColumnPermission[] = [
   { gridId: 'students', columnKey: 'city', columnLabel: 'Memleket', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher', 'parent'] },
   { gridId: 'students', columnKey: 'lessons', columnLabel: 'Dersler', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
   { gridId: 'students', columnKey: 'actions', columnLabel: 'Islem', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  // Okullar / Medreseler
+  { gridId: 'schools', columnKey: 'address', columnLabel: 'Adres', allowedRoles: ['superadmin', 'admin'] },
+  { gridId: 'schools', columnKey: 'phone', columnLabel: 'Telefon', allowedRoles: ['superadmin', 'admin'] },
+  { gridId: 'schools', columnKey: 'principal', columnLabel: 'Yetkili', allowedRoles: ['superadmin', 'admin'] },
+  { gridId: 'schools', columnKey: 'studentCount', columnLabel: 'Ogrenci Sayisi', allowedRoles: ['superadmin', 'admin'] },
+  { gridId: 'schools', columnKey: 'actions', columnLabel: 'Islem', allowedRoles: ['superadmin', 'admin'] },
+  // Dersler
+  { gridId: 'lessons', columnKey: 'name', columnLabel: 'Ders Adi', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'lessons', columnKey: 'classRoom', columnLabel: 'Sinif', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'lessons', columnKey: 'dayOfWeek', columnLabel: 'Gun', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'lessons', columnKey: 'time', columnLabel: 'Saat', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'lessons', columnKey: 'studentCount', columnLabel: 'Ogrenci Sayisi', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'lessons', columnKey: 'actions', columnLabel: 'Islem', allowedRoles: ['superadmin', 'admin'] },
+  // Ders Öğrencileri
+  { gridId: 'lessonStudents', columnKey: 'firstName', columnLabel: 'Ad Soyad', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'lessonStudents', columnKey: 'grade', columnLabel: 'Sinif', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'lessonStudents', columnKey: 'school', columnLabel: 'Medrese', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'lessonStudents', columnKey: 'parentName', columnLabel: 'Veli', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'lessonStudents', columnKey: 'parentPhone', columnLabel: 'Veli Telefon', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'lessonStudents', columnKey: 'phone', columnLabel: 'Ogrenci Telefon', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  // Yoklama
+  { gridId: 'attendance', columnKey: 'date', columnLabel: 'Tarih', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'attendance', columnKey: 'student', columnLabel: 'Ogrenci', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'attendance', columnKey: 'status', columnLabel: 'Durum', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'attendance', columnKey: 'notes', columnLabel: 'Not', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'attendance', columnKey: 'actions', columnLabel: 'Islem', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  // Gelişim Takibi
+  { gridId: 'progress', columnKey: 'date', columnLabel: 'Tarih', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'progress', columnKey: 'student', columnLabel: 'Ogrenci', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'progress', columnKey: 'kuran', columnLabel: 'Kuran', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'progress', columnKey: 'risale', columnLabel: 'Risale', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'progress', columnKey: 'elifba', columnLabel: 'Elifba', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'progress', columnKey: 'notes', columnLabel: 'Not', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  { gridId: 'progress', columnKey: 'actions', columnLabel: 'Islem', allowedRoles: ['superadmin', 'admin', 'authorized_teacher', 'teacher'] },
+  // Yorumlar
+  { gridId: 'comments', columnKey: 'student', columnLabel: 'Ogrenci', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'comments', columnKey: 'type', columnLabel: 'Tur', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'comments', columnKey: 'author', columnLabel: 'Yazar', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'comments', columnKey: 'date', columnLabel: 'Tarih', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'comments', columnKey: 'content', columnLabel: 'Icerik', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'comments', columnKey: 'actions', columnLabel: 'Islem', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  // Raporlar
+  { gridId: 'reports', columnKey: 'date', columnLabel: 'Tarih', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'reports', columnKey: 'student', columnLabel: 'Ogrenci', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'reports', columnKey: 'type', columnLabel: 'Tur', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'reports', columnKey: 'method', columnLabel: 'Yontem', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'reports', columnKey: 'status', columnLabel: 'Durum', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
+  { gridId: 'reports', columnKey: 'actions', columnLabel: 'Islem', allowedRoles: ['superadmin', 'admin', 'authorized_teacher'] },
 ];
 
 export const PERMISSIONS = {
@@ -318,3 +372,11 @@ export const PERMISSIONS = {
   PERMISSION_MANAGE: ['superadmin'] as UserRole[],
   USER_MANAGE: ['superadmin', 'admin'] as UserRole[],
 };
+
+export interface ParentConsent {
+  userId: number;
+  illuminationConsent: boolean;
+  kvkkConsent: boolean;
+  illuminationConsentedAt?: string | null;
+  kvkkConsentedAt?: string | null;
+}

@@ -189,16 +189,11 @@ export function PermissionsPage() {
     permissionMatrix,
     updatePermissionMatrixEntry,
     resetPermissionMatrix,
-    getAssignedLessons,
-    assignLessonToTeacher,
-    unassignLessonFromTeacher,
     usersLoaded,
     refreshUsers,
-    teacherLessonsLoaded,
-    refreshTeacherLessons,
   } = useAuth();
   const [activeTab, setActiveTab] = useState<
-    "users" | "matrix" | "teacherLinks" | "gridColumns" | "settings"
+    "users" | "matrix" | "gridColumns" | "settings"
   >("users");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
@@ -234,7 +229,6 @@ export function PermissionsPage() {
     data.loadStudents();
     data.loadLessons();
     refreshUsers();
-    refreshTeacherLessons();
     apiGet<{ value?: string }>("system-settings/sub_topic_required")
       .then((d) => setSubTopicRequired(String(d.value).toLowerCase() === "true"))
       .catch(() => setSubTopicRequired(false));
@@ -247,7 +241,7 @@ export function PermissionsPage() {
     data.loadMemorizationCriteria();
   }, []);
   /*
-  if (data.loadingStudents || data.loadingLessons || !usersLoaded || !teacherLessonsLoaded) {
+  if (data.loadingStudents || data.loadingLessons || !usersLoaded) {
     return <Loading />;
   }*/
 
@@ -361,6 +355,7 @@ export function PermissionsPage() {
         selectedGrid,
         col.columnKey,
         newRoles as UserRole[],
+        col.columnLabel,
       );
   };
 
@@ -384,12 +379,7 @@ export function PermissionsPage() {
         >
           Yetki Matrisi
         </button>
-        <button
-          onClick={() => setActiveTab("teacherLinks")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "teacherLinks" ? "border-emerald-600 text-emerald-700" : "border-transparent text-gray-500"}`}
-        >
-          Öğretmen-Ders İlişkisi
-        </button>
+
         <button
           onClick={() => setActiveTab("gridColumns")}
           className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "gridColumns" ? "border-emerald-600 text-emerald-700" : "border-transparent text-gray-500"}`}
@@ -551,112 +541,6 @@ export function PermissionsPage() {
             </CardContent>
           </Card>
         </>
-      )}
-
-      {activeTab === "teacherLinks" && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <BookMarked size={18} /> Öğretmen-Ders İlişkisi
-            </CardTitle>
-            <CardDescription>
-              Hangi öğretmenin hangi derslere atandığını görün
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0 overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Öğretmen</TableHead>
-                  <TableHead className="text-xs">Rol</TableHead>
-                  <TableHead className="text-xs">Atanmış Dersler</TableHead>
-                  <TableHead className="text-xs">Tüm Dersler</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users
-                  .filter(
-                    (u) =>
-                      u.role === "teacher" || u.role === "authorized_teacher",
-                  )
-                  .map((u) => {
-                    const assigned = getAssignedLessons(u.id);
-                    const assignedLessons = data.lessons.filter((l) =>
-                      assigned.includes(l.id),
-                    );
-                    const allLessons = data.lessons;
-                    return (
-                      <TableRow key={u.id}>
-                        <TableCell className="font-medium text-sm">
-                          {u.fullName}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            className={`${ROLE_COLORS[u.role]} text-white text-[10px]`}
-                          >
-                            {ROLE_LABELS[u.role]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {assignedLessons.length > 0 ? (
-                              assignedLessons.map((l) => (
-                                <Badge
-                                  key={l.id}
-                                  variant="outline"
-                                  className="text-[10px] bg-emerald-50 border-emerald-300 text-emerald-700"
-                                >
-                                  {l.name}
-                                </Badge>
-                              ))
-                            ) : (
-                              <span className="text-xs text-gray-400">
-                                Atanmış ders yok
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {allLessons.map((l) => {
-                              const isAssigned = assigned.includes(l.id);
-                              return (
-                                <button
-                                  key={l.id}
-                                  type="button"
-                                  onClick={() => {
-                                    if (isAssigned)
-                                      unassignLessonFromTeacher(u.id, l.id);
-                                    else assignLessonToTeacher(u.id, l.id);
-                                  }}
-                                  className={`px-2 py-0.5 rounded text-[10px] border transition-colors ${isAssigned ? "bg-emerald-50 border-emerald-300 text-emerald-700" : "bg-gray-50 border-gray-200 text-gray-400 hover:bg-gray-100"}`}
-                                >
-                                  {l.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                {users.filter(
-                  (u) =>
-                    u.role === "teacher" || u.role === "authorized_teacher",
-                ).length === 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={4}
-                      className="text-center py-8 text-gray-500"
-                    >
-                      Öğretmen kullanıcısı bulunamadı
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
       )}
 
       {activeTab === "gridColumns" && (

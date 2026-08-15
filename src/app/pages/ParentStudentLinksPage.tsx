@@ -11,12 +11,18 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Table,
   TableBody,
@@ -25,14 +31,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Trash2 } from "lucide-react";
+import { Trash2, Check, ChevronsUpDown } from "lucide-react";
 import { Loading } from "@/components/Loading";
+import { cn } from "@/lib/utils";
 
 export function ParentStudentLinksPage() {
   const data = useStudentData();
   const { users, refreshUsers, usersLoaded } = useAuth();
   const [selectedParentId, setSelectedParentId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [parentOpen, setParentOpen] = useState(false);
+  const [studentOpen, setStudentOpen] = useState(false);
 
   useEffect(() => {
     data.loadStudents();
@@ -104,44 +113,116 @@ export function ParentStudentLinksPage() {
           <div className="flex flex-wrap gap-3 items-end">
             <div className="space-y-1 w-full sm:w-64">
               <Label className="text-xs">Veli</Label>
-              <Select
-                value={selectedParentId}
-                onValueChange={setSelectedParentId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Veli seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {parents.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.fullName} ({p.username})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={parentOpen} onOpenChange={setParentOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={parentOpen}
+                    className="w-full justify-between"
+                  >
+                    {selectedParentId
+                      ? parents.find((p) => String(p.id) === selectedParentId)
+                          ?.fullName
+                      : "Veli seçin"}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-full sm:w-64 p-0">
+                  <Command>
+                    <CommandInput placeholder="Veli ara..." />
+                    <CommandList>
+                      <CommandEmpty>Veli bulunamadı</CommandEmpty>
+                      <CommandGroup>
+                        {parents.map((p) => (
+                          <CommandItem
+                            key={p.id}
+                            value={`${p.fullName} ${p.username} ${p.phone}`}
+                            onSelect={() => {
+                              setSelectedParentId(String(p.id));
+                              setParentOpen(false);
+                            }}
+                          >
+                            <Check
+                              size={14}
+                              className={cn(
+                                "mr-2 shrink-0",
+                                selectedParentId === String(p.id)
+                                  ? "opacity-100"
+                                  : "opacity-0",
+                              )}
+                            />
+                            {p.fullName} ({p.username})
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
             <div className="space-y-1 w-full sm:w-64">
               <Label className="text-xs">Öğrenci</Label>
-              <Select
-                value={selectedStudentId}
-                onValueChange={setSelectedStudentId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Öğrenci seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {students.map((s) => (
-                    <SelectItem
-                      key={s.id}
-                      value={String(s.id)}
-                      disabled={linkedStudentIds.has(s.id)}
-                    >
-                      {s.firstName} {s.lastName}{" "}
-                      {linkedStudentIds.has(s.id) && "(zaten velisi var)"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={studentOpen} onOpenChange={setStudentOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={studentOpen}
+                    className="w-full justify-between"
+                  >
+                    {selectedStudentId
+                      ? (() => {
+                          const s = students.find(
+                            (x) => String(x.id) === selectedStudentId,
+                          );
+                          return s ? `${s.firstName} ${s.lastName}` : "";
+                        })()
+                      : "Öğrenci seçin"}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-full sm:w-64 p-0">
+                  <Command>
+                    <CommandInput placeholder="Öğrenci ara..." />
+                    <CommandList>
+                      <CommandEmpty>Öğrenci bulunamadı</CommandEmpty>
+                      <CommandGroup>
+                        {students.map((s) => {
+                          const alreadyLinked = linkedStudentIds.has(s.id);
+                          return (
+                            <CommandItem
+                              key={s.id}
+                              value={`${s.firstName} ${s.lastName} ${s.grade}`}
+                              disabled={alreadyLinked}
+                              onSelect={() => {
+                                if (alreadyLinked) return;
+                                setSelectedStudentId(String(s.id));
+                                setStudentOpen(false);
+                              }}
+                              className={cn(
+                                alreadyLinked && "opacity-50 cursor-not-allowed",
+                              )}
+                            >
+                              <Check
+                                size={14}
+                                className={cn(
+                                  "mr-2 shrink-0",
+                                  selectedStudentId === String(s.id)
+                                    ? "opacity-100"
+                                    : "opacity-0",
+                                )}
+                              />
+                              {s.firstName} {s.lastName}
+                              {alreadyLinked && " (zaten velisi var)"}
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
             <Button
               onClick={handleAdd}

@@ -200,7 +200,17 @@ export function DashboardPage() {
   );
 
   const today = new Date().toISOString().split("T")[0];
-  const todayAtt = data.attendance.filter((a) => a.date === today);
+  const scopedSchoolId =
+    currentUser?.role === "superadmin"
+      ? null
+      : (currentUser?.schoolId ?? null);
+  const studentIdsInScope = useMemo(
+    () => new Set(data.students.map((s) => s.id)),
+    [data.students],
+  );
+  const todayAtt = data.attendance.filter(
+    (a) => a.date === today && studentIdsInScope.has(a.studentId),
+  );
 
   // Son 30 günün tarih listesini hazirla
   const last30Days = useMemo(() => {
@@ -214,9 +224,17 @@ export function DashboardPage() {
     return list;
   }, []);
 
+  const scopedStudents = useMemo(
+    () =>
+      data.students.filter(
+        (s) => scopedSchoolId === null || s.schoolId === scopedSchoolId,
+      ),
+    [data.students, scopedSchoolId],
+  );
+
   const dailyStudents = useMemo(() => {
     const map: Record<string, number> = {};
-    data.students.forEach((s) => {
+    scopedStudents.forEach((s) => {
       const date = new Date(s.createdAt).toISOString().split("T")[0];
       map[date] = (map[date] || 0) + 1;
     });
@@ -228,11 +246,11 @@ export function DashboardPage() {
       }),
       count: map[date] || 0,
     }));
-  }, [data.students, last30Days]);
+  }, [scopedStudents, last30Days]);
 
   const dailyLessons = useMemo(() => {
     const map: Record<string, number> = {};
-    data.students.forEach((s) => {
+    scopedStudents.forEach((s) => {
       const date = new Date(s.createdAt).toISOString().split("T")[0];
       map[date] = (map[date] || 0) + s.lessons.length;
     });
@@ -244,7 +262,7 @@ export function DashboardPage() {
       }),
       count: map[date] || 0,
     }));
-  }, [data.students, last30Days]);
+  }, [scopedStudents, last30Days]);
 
   const pcd = useMemo(() => {
     if (!ps) return [];
@@ -265,25 +283,33 @@ export function DashboardPage() {
   // Ogretmen-ders istatistigi (admin/superadmin icin)
   const groupDistribution = useMemo(() => {
     return data.classRooms
-      .filter((c) => c.active)
+      .filter(
+        (c) =>
+          c.active &&
+          (scopedSchoolId === null || c.schoolId === scopedSchoolId),
+      )
       .map((c) => ({
         name: c.name,
-        value: data.students.filter((s) => s.groupId === c.id).length,
+        value: scopedStudents.filter((s) => s.groupId === c.id).length,
       }))
       .filter((d) => d.value > 0)
       .sort((a, b) => b.value - a.value);
-  }, [data.classRooms, data.students]);
+  }, [data.classRooms, scopedStudents, scopedSchoolId]);
 
   const courseDistribution = useMemo(() => {
     return data.lessons
-      .filter((c) => c.active !== false)
+      .filter(
+        (c) =>
+          c.active !== false &&
+          (scopedSchoolId === null || c.schoolId === scopedSchoolId),
+      )
       .map((c) => ({
         name: c.name,
-        value: data.students.filter((s) => s.lessons.includes(c.id)).length,
+        value: scopedStudents.filter((s) => s.lessons.includes(c.id)).length,
       }))
       .filter((d) => d.value > 0)
       .sort((a, b) => b.value - a.value);
-  }, [data.lessons, data.students]);
+  }, [data.lessons, scopedStudents, scopedSchoolId]);
 
   const PIE_COLORS = [
     "#dcee7f",
@@ -297,39 +323,6 @@ export function DashboardPage() {
     "#6366f1",
     "#84cc16",
   ];
-
-  const teacherStats = useMemo(() => {
-    if (
-      !currentUser ||
-      (currentUser.role !== "superadmin" && currentUser.role !== "admin")
-    )
-      return null;
-    // localStorage'dan ogretmen-ders atamalarini oku
-    try {
-      const assignments: { teacherId: number; lessonId: number }[] = JSON.parse(
-        localStorage.getItem("ots_teacher_lessons") || "[]",
-      );
-      const teachers = JSON.parse(
-        localStorage.getItem("ots_users") || "[]",
-      ).filter(
-        (u: User) => u.role === "teacher" || u.role === "authorized_teacher",
-      );
-      return teachers
-        .map((t: User & { displayName?: string }) => ({
-          name: t.displayName || t.username,
-          role: t.role === "authorized_teacher" ? "Yetkili Öğr." : "Öğretmen",
-          lessonCount: assignments.filter(
-            (a: { teacherId: number }) => a.teacherId === t.id,
-          ).length,
-        }))
-        .sort(
-          (a: { lessonCount: number }, b: { lessonCount: number }) =>
-            b.lessonCount - a.lessonCount,
-        );
-    } catch {
-      return null;
-    }
-  }, [currentUser]);
 
   const stats = [
     {
@@ -345,7 +338,7 @@ export function DashboardPage() {
       color: "bg-emerald-500",
     },
     {
-      title: "Ders",
+      title: "Kurs",
       value: data.lessons.length,
       icon: BookOpen,
       color: "bg-purple-500",
@@ -364,7 +357,8 @@ export function DashboardPage() {
     },
     {
       title: "Gelişim",
-      value: data.progress.length,
+      value: data.progress.filter((p) => studentIdsInScope.has(p.studentId))
+        .length,
       icon: TrendingUp,
       color: "bg-orange-500",
     },
@@ -372,7 +366,9 @@ export function DashboardPage() {
 
   // Ogretmenlere yoklama hatirlatici
   const todayStr = new Date().toISOString().split("T")[0];
-  const hasAttendanceToday = data.attendance.some((a) => a.date === todayStr);
+  const hasAttendanceToday = data.attendance.some(
+    (a) => a.date === todayStr && studentIdsInScope.has(a.studentId),
+  );
   const showReminder =
     currentUser &&
     (currentUser.role === "authorized_teacher" ||
@@ -423,41 +419,6 @@ export function DashboardPage() {
           </Card>
         ))}
       </div>
-      {teacherStats && teacherStats.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Users size={18} /> Öğretmenler ve Ders Atamaları
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {teacherStats.map(
-                (
-                  t: { name: string; role: string; lessonCount: number },
-                  i: number,
-                ) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                  >
-                    <div>
-                      <p className="font-medium text-sm">{t.name}</p>
-                      <p className="text-[10px] text-gray-500">{t.role}</p>
-                    </div>
-                    <Badge
-                      variant={t.lessonCount > 0 ? "default" : "secondary"}
-                      className="text-xs"
-                    >
-                      {t.lessonCount} ders
-                    </Badge>
-                  </div>
-                ),
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader className="pb-3">
@@ -756,6 +717,7 @@ export function DashboardPage() {
           <CardContent>
             <div className="space-y-3">
               {data.progress
+                .filter((p) => studentIdsInScope.has(p.studentId))
                 .slice(-5)
                 .reverse()
                 .map((p) => {

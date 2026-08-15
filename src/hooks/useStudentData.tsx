@@ -1,4 +1,4 @@
-import { useState, useCallback, createContext, useContext, type ReactNode } from 'react';
+import { useState, useCallback, createContext, useContext, useEffect, type ReactNode } from 'react';
 import type {
   Student,
   School,
@@ -15,8 +15,10 @@ import type {
   MemorizationStatus,
   MemorizationCriteria,
   MemorizationSummary,
+  ParentConsent,
 } from '@/types';
 import { apiGet, apiPost, apiPut, apiDelete } from './useApi';
+import { useAuth } from './useAuth';
 
 function useStudentDataInternal() {
   // --- Loading flags ---
@@ -65,9 +67,11 @@ function useStudentDataInternal() {
   const [loadedMemorizationTracking, setLoadedMemorizationTracking] = useState(false);
   const [loadedMemorizationCriteria, setLoadedMemorizationCriteria] = useState(false);
   const [loadedParentStudentLinks, setLoadedParentStudentLinks] = useState(false);
+  const [loadedArchivedStudents, setLoadedArchivedStudents] = useState(false);
 
   // --- Data states ---
   const [students, setStudents] = useState<Student[]>([]);
+  const [archivedStudents, setArchivedStudents] = useState<Student[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [lessons, setLessons] = useState<Course[]>([]);
   const [courseSchedules, setCourseSchedules] = useState<CourseSchedule[]>([]);
@@ -89,6 +93,9 @@ function useStudentDataInternal() {
   const [memorizationCriteria, setMemorizationCriteria] = useState<MemorizationCriteria[]>([]);
   const [memorizationSummaries, setMemorizationSummaries] = useState<Record<number, MemorizationSummary>>({});
   const [parentStudentLinks, setParentStudentLinks] = useState<{ parentUserId: number; studentId: number }[]>([]);
+  const [parentConsent, setParentConsent] = useState<ParentConsent | null>(null);
+  const [loadedParentConsent, setLoadedParentConsent] = useState(false);
+  const [loadingParentConsent, setLoadingParentConsent] = useState(false);
 
   // --- Loaders ---
   const loadStudents = useCallback(async (force = false) => {
@@ -101,6 +108,17 @@ function useStudentDataInternal() {
     } catch (err) { console.error('loadStudents error:', err); }
     finally { setLoadingStudents(false); }
   }, [loadedStudents]);
+
+  const loadArchivedStudents = useCallback(async (force = false) => {
+    if (loadedArchivedStudents && !force) return;
+    setLoadingStudents(true);
+    try {
+      const value = await apiGet<any[]>('students?archived=1');
+      setArchivedStudents(value.map(ns));
+      setLoadedArchivedStudents(true);
+    } catch (err) { console.error('loadArchivedStudents error:', err); }
+    finally { setLoadingStudents(false); }
+  }, [loadedArchivedStudents]);
 
   const loadSchools = useCallback(async (force = false) => {
     if (loadedSchools && !force) return;
@@ -261,7 +279,7 @@ function useStudentDataInternal() {
     setLoadingHomeworkAssignments(true);
     try {
       const value = await apiGet<any[]>('homework-assignments');
-      setHomeworkAssignments(value);
+      setHomeworkAssignments(value.map(nha));
       setLoadedHomeworkAssignments(true);
     } catch (err) { console.error('loadHomeworkAssignments error:', err); }
     finally { setLoadingHomeworkAssignments(false); }
@@ -335,6 +353,36 @@ function useStudentDataInternal() {
     finally { setLoadingParentStudentLinks(false); }
   }, [loadedParentStudentLinks]);
 
+  const loadParentConsent = useCallback(async (force = false) => {
+    if (loadedParentConsent && !force) return;
+    setLoadingParentConsent(true);
+    try {
+      const value = await apiGet<any>('parent-consents');
+      const normalizeBool = (v: any) => v === true || v === 1 || v === '1' || v === 'true';
+      setParentConsent({
+        userId: Number(value.user_id ?? value.userId),
+        illuminationConsent: normalizeBool(value.illumination_consent ?? value.illuminationConsent),
+        kvkkConsent: normalizeBool(value.kvkk_consent ?? value.kvkkConsent),
+        illuminationConsentedAt: value.illumination_consented_at ?? value.illuminationConsentedAt ?? null,
+        kvkkConsentedAt: value.kvkk_consented_at ?? value.kvkkConsentedAt ?? null,
+      });
+      setLoadedParentConsent(true);
+    } catch (err) { console.error('loadParentConsent error:', err); }
+    finally { setLoadingParentConsent(false); }
+  }, [loadedParentConsent]);
+
+  const saveParentConsent = async (payload: { illuminationConsent: boolean; kvkkConsent: boolean }) => {
+    try {
+      await apiPost('parent-consents', payload);
+      setParentConsent((prev) => ({
+        userId: prev?.userId ?? 0,
+        ...payload,
+        illuminationConsentedAt: payload.illuminationConsent ? new Date().toISOString() : prev?.illuminationConsentedAt ?? null,
+        kvkkConsentedAt: payload.kvkkConsent ? new Date().toISOString() : prev?.kvkkConsentedAt ?? null,
+      }));
+    } catch (err) { console.error('saveParentConsent error:', err); throw err; }
+  };
+
   const _api = (fn: () => Promise<any>) => { fn().catch(e => console.error('API error:', e)); };
 
   // --- Students ---
@@ -347,7 +395,11 @@ function useStudentDataInternal() {
   };
   const updateStudent = (id: number, data: Partial<Student>) => {
     setStudents(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
-    _api(() => apiPut(`students/${id}`, data).then(() => loadStudents(true)));
+    setArchivedStudents(prev => prev.map(s => s.id === id ? { ...s, ...data } : s));
+    _api(() => apiPut(`students/${id}`, data).then(() => {
+      loadStudents(true);
+      loadArchivedStudents(true);
+    }));
   };
   const assignCourseToStudents = (courseId: number, studentIds: number[]) => {
     // Optimistically mark selected students as enrolled in the course.
@@ -358,7 +410,11 @@ function useStudentDataInternal() {
   };
   const deleteStudent = (id: number) => {
     setStudents(prev => prev.filter(s => s.id !== id));
-    _api(() => apiDelete(`students/${id}`).then(() => loadStudents(true)));
+    setArchivedStudents(prev => prev.filter(s => s.id !== id));
+    _api(() => apiDelete(`students/${id}`).then(() => {
+      loadStudents(true);
+      loadArchivedStudents(true);
+    }));
   };
   const getStudentLessons = (studentId: number) => {
     const s = students.find(x => x.id === studentId);
@@ -698,6 +754,30 @@ function useStudentDataInternal() {
         ),
     );
   };
+  const setMemorizationStatusesBatch = async (
+    studentId: number,
+    items: { textId: number; status: MemorizationStatus; teacherNote?: string; scores?: Record<string, number> }[],
+  ) => {
+    const next = items.map(item => {
+      const existing = memorizationTracking.find(r => r.studentId === studentId && r.textId === item.textId);
+      return existing
+        ? { ...existing, ...item }
+        : { id: Date.now() + item.textId, studentId, ...item };
+    });
+    setMemorizationTracking(prev => {
+      const untouched = prev.filter(r => r.studentId !== studentId || !items.some(i => i.textId === r.textId));
+      return [...next, ...untouched];
+    });
+    await _api(() =>
+      apiPost('memorization-tracking/batch', { studentId, items })
+        .then(() =>
+          Promise.all([
+            loadMemorizationTracking(true),
+            loadMemorizationSummary(studentId, true),
+          ]),
+        ),
+    );
+  };
   const updateMemorizationTracking = (id: number, data: Partial<MemorizationTracking>) => {
     const record = memorizationTracking.find(r => r.id === id);
     setMemorizationTracking(prev => prev.map(r => r.id === id ? { ...r, ...data } : r));
@@ -750,9 +830,29 @@ function useStudentDataInternal() {
   const getStudentParents = (studentId: number) => parentStudentLinks.filter(l => l.studentId === studentId).map(l => l.parentUserId);
   const getParentStudents = (parentUserId: number) => parentStudentLinks.filter(l => l.parentUserId === parentUserId).map(l => l.studentId);
 
+  const resetData = useCallback(() => {
+    setStudents([]); setSchools([]); setLessons([]); setCourseSchedules([]);
+    setAttendance([]); setProgress([]); setComments([]); setReports([]);
+    setSurveys([]); setSurveyQuestions([]); setSurveyAnswers([]);
+    setCurriculumTopics([]); setLessonLogs([]); setClassRooms([]);
+    setHomeworkTemplates([]); setHomeworkAssignments([]); setStudentReports([]);
+    setMemorizationTexts([]); setMemorizationTracking([]); setMemorizationCriteria([]);
+    setMemorizationSummaries({}); setParentStudentLinks([]); setParentConsent(null);
+    setArchivedStudents([]);
+
+    setLoadedStudents(false); setLoadedSchools(false); setLoadedLessons(false);
+    setLoadedCourseSchedules(false); setLoadedAttendance(false); setLoadedProgress(false);
+    setLoadedComments(false); setLoadedReports(false); setLoadedCurriculumTopics(false);
+    setLoadedLessonLogs(false); setLoadedClassRooms(false); setLoadedSurveys(false);
+    setLoadedSurveyQuestions(false); setLoadedSurveyAnswers(false);
+    setLoadedHomeworkTemplates(false); setLoadedHomeworkAssignments(false); setLoadedStudentReports(false);
+    setLoadedMemorizationTexts(false); setLoadedMemorizationTracking(false); setLoadedMemorizationCriteria(false);
+    setLoadedParentStudentLinks(false); setLoadedParentConsent(false); setLoadedArchivedStudents(false);
+  }, []);
+
   return {
     // data
-    students, schools, lessons, courseSchedules, attendance, progress, comments, reports,
+    students, archivedStudents, schools, lessons, courseSchedules, attendance, progress, comments, reports,
     surveys, surveyQuestions, surveyAnswers,
     curriculumTopics, lessonLogs, classRooms,
     homeworkTemplates, homeworkAssignments,
@@ -760,19 +860,27 @@ function useStudentDataInternal() {
     memorizationTexts, memorizationTracking, memorizationCriteria, memorizationSummaries,
     parentStudentLinks,
     // loaders
-    loadStudents, loadSchools, loadLessons, loadCourseSchedules, loadAttendance, loadProgress, loadComments,
+    loadStudents, loadArchivedStudents, loadSchools, loadLessons, loadCourseSchedules, loadAttendance, loadProgress, loadComments,
     loadReports, loadCurriculumTopics, loadLessonLogs, loadClassRooms,
     loadSurveys, loadSurveyQuestions, loadSurveyAnswers,
     loadHomeworkTemplates, loadHomeworkAssignments, loadStudentReports,
     loadMemorizationTexts, loadMemorizationTracking, loadMemorizationCriteria, loadMemorizationSummary,
-    loadParentStudentLinks,
+    loadParentStudentLinks, loadParentConsent,
+    saveParentConsent,
+    // reset
+    resetData,
+    // archived loaders
+    loadedArchivedStudents,
     // loading flags
     loadingStudents, loadingSchools, loadingLessons, loadingCourseSchedules, loadingAttendance, loadingProgress, loadingComments,
     loadingReports, loadingCurriculumTopics, loadingLessonLogs, loadingClassRooms,
     loadingSurveys, loadingSurveyQuestions, loadingSurveyAnswers,
     loadingHomeworkTemplates, loadingHomeworkAssignments, loadingStudentReports,
     loadingMemorizationTexts, loadingMemorizationTracking, loadingMemorizationCriteria, loadingMemorizationSummary,
-    loadingParentStudentLinks,
+    loadingParentStudentLinks, loadingParentConsent,
+    loadedParentConsent,
+    // data
+    parentConsent,
     // CRUD helpers
     addStudent, updateStudent, deleteStudent, getStudentLessons, assignCourseToStudents,
     addSchool, updateSchool, deleteSchool,
@@ -794,7 +902,7 @@ function useStudentDataInternal() {
     addHomeworkAssignment, getStudentHomeworks, toggleHomeworkCompleted, deleteHomeworkAssignment,
     addStudentReport, getStudentReports, deleteStudentReport,
     addMemorizationText, updateMemorizationText, deleteMemorizationText,
-    setMemorizationStatus, updateMemorizationTracking, deleteMemorizationTracking,
+    setMemorizationStatus, setMemorizationStatusesBatch, updateMemorizationTracking, deleteMemorizationTracking,
     addMemorizationCriteria, updateMemorizationCriteria, deleteMemorizationCriteria,
     addParentStudentLink, deleteParentStudentLink,
     getStudentParents, getParentStudents,
@@ -812,14 +920,30 @@ function ns(r: any): Student {
     phone: r.phone || '', parentName: r.parent_name || '', parentPhone: r.parent_phone || '', email: r.email || '',
     lessons: Array.isArray(r.lessons) ? r.lessons : safeJson(r.lessons),
     groupId: r.group_id ?? r.groupId ?? null,
+    archived: r.archived === true || r.archived === 1 || r.archived === '1',
     createdAt: r.created_at || r.createdAt || '',
   };
 }
 function nsc(r: any): School {
   return { id: r.id, name: r.name || '', address: r.address || '', phone: r.phone || '', principalName: r.principal_name || '', active: r.active !== false };
 }
+function nha(r: any) {
+  return {
+    id: r.id,
+    studentId: r.student_id ?? r.studentId ?? null,
+    templateId: r.template_id ?? r.templateId ?? null,
+    title: r.title || '',
+    content: r.content || '',
+    details: r.details || '',
+    dueDate: r.due_date ?? r.dueDate ?? null,
+    completed: r.completed === true || r.completed === 1 || r.completed === '1',
+    completedAt: r.completed_at ?? r.completedAt ?? null,
+    createdBy: r.created_by ?? r.createdBy ?? null,
+    createdAt: (r.created_at ?? r.createdAt) || '',
+  };
+}
 function nc(r: any): Course {
-  return { id: r.id, name: r.name || '', description: r.description || '', active: r.active !== false, createdAt: r.created_at || '' };
+  return { id: r.id, name: r.name || '', description: r.description || '', schoolId: r.school_id ?? r.schoolId ?? null, active: r.active !== false, createdAt: r.created_at || '' };
 }
 function nl(r: any): CourseSchedule {
   return {
@@ -911,7 +1035,7 @@ function nmtr(r: any): MemorizationTracking {
     id: r.id,
     studentId: r.student_id,
     textId: r.text_id,
-    status: r.status || 'failed',
+    status: r.status || 'not_appointment',
     scores: safeJsonRecord(r.scores),
     teacherNote: r.teacher_note || '',
     checkedBy: r.checked_by,
@@ -980,6 +1104,15 @@ const StudentDataContext = createContext<StudentDataContextValue | undefined>(un
 
 export function StudentDataProvider({ children }: { children: ReactNode }) {
   const value = useStudentDataInternal();
+  const { currentUser } = useAuth();
+
+  useEffect(() => {
+    if (currentUser) {
+      value.resetData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
   return (
     <StudentDataContext.Provider value={value}>
       {children}

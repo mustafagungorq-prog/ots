@@ -1,6 +1,16 @@
 <?php
 require_once __DIR__ . '/auth.php';
 
+if (!function_exists('logApiError')) {
+    function logApiError($message) {
+        $logDir = dirname(__DIR__) . '/logs';
+        if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
+        $logFile = $logDir . '/error.log';
+        $line = date('Y-m-d H:i:s') . ' ' . $message . PHP_EOL;
+        @file_put_contents($logFile, $line, FILE_APPEND);
+    }
+}
+
 if (!function_exists('mail_json_response')) {
     function mail_json_response($data, $statusCode = 200) {
         http_response_code($statusCode);
@@ -36,29 +46,80 @@ if (!function_exists('mail_send_native')) {
     }
 }
 
-if (!function_exists('mail_send_phpmailer')) {
-    function mail_send_phpmailer($to, $subject, $html, $text, $replyTo, $fromAddress, $fromName) {
-        $autoloadCandidates = [
-            dirname(__DIR__) . '/vendor/autoload.php',
-            dirname(__DIR__, 2) . '/vendor/autoload.php',
-        ];
-
-        $autoloadPath = null;
-        foreach ($autoloadCandidates as $candidate) {
+if (!function_exists('find_phpmailer_autoload')) {
+    function find_phpmailer_autoload() {
+        $candidates = [];
+        $dir = __DIR__;
+        for ($i = 0; $i < 6 && $dir !== dirname($dir); $i++) {
+            $candidate = $dir . '/vendor/autoload.php';
+            $candidates[] = $candidate;
             if (file_exists($candidate)) {
-                $autoloadPath = $candidate;
-                break;
+                return [$candidate, $candidates];
+            }
+            $dir = dirname($dir);
+        }
+        $docRoot = $_SERVER['DOCUMENT_ROOT'] ?? '';
+        if ($docRoot !== '') {
+            foreach (['', '/ots', '/api'] as $sub) {
+                $candidate = rtrim($docRoot, '/') . $sub . '/vendor/autoload.php';
+                $candidates[] = $candidate;
+                if (file_exists($candidate)) {
+                    return [$candidate, $candidates];
+                }
             }
         }
+        $home = $_SERVER['HOME'] ?? '';
+        if ($home !== '') {
+            foreach (['', '/.composer', '/vendor'] as $sub) {
+                $candidate = rtrim($home, '/') . $sub . '/vendor/autoload.php';
+                $candidates[] = $candidate;
+                if (file_exists($candidate)) {
+                    return [$candidate, $candidates];
+                }
+            }
+        }
+        return [null, $candidates];
+    }
+}
 
-        if ($autoloadPath === null) {
+if (!function_exists('load_phpmailer')) {
+    function load_phpmailer() {
+        if (class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
+            return true;
+        }
+        list($autoloadPath, $candidates) = find_phpmailer_autoload();
+        logApiError('PHPMailer autoload candidates: ' . implode(', ', $candidates));
+        if ($autoloadPath !== null) {
+            logApiError('PHPMailer autoload found: ' . $autoloadPath);
+            require_once $autoloadPath;
+            return class_exists('PHPMailer\\PHPMailer\\PHPMailer');
+        }
+        logApiError('PHPMailer autoload.php not found, trying manual load');
+        $manualBase = dirname(__DIR__) . '/PHPMailer/src';
+        $manualFiles = [
+            $manualBase . '/Exception.php',
+            $manualBase . '/PHPMailer.php',
+            $manualBase . '/SMTP.php',
+        ];
+        foreach ($manualFiles as $file) {
+            if (!file_exists($file)) {
+                logApiError('PHPMailer manual file missing: ' . $file);
+                return false;
+            }
+            require_once $file;
+        }
+        logApiError('PHPMailer manually loaded from: ' . $manualBase);
+        return class_exists('PHPMailer\\PHPMailer\\PHPMailer');
+    }
+}
+
+if (!function_exists('mail_send_phpmailer')) {
+    function mail_send_phpmailer($to, $subject, $html, $text, $replyTo, $fromAddress, $fromName) {
+        if (!load_phpmailer()) {
+            logApiError('PHPMailer could not be loaded');
             return false;
         }
-
-        require_once $autoloadPath;
-        if (!class_exists('PHPMailer\\PHPMailer\\PHPMailer')) {
-            return false;
-        }
+        logApiError('PHPMailer class loaded');
 
         $mail = new PHPMailer\PHPMailer\PHPMailer(true);
         $mail->isSMTP();
@@ -69,6 +130,10 @@ if (!function_exists('mail_send_phpmailer')) {
         $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_SMTPS;
         $mail->Port = (int)(env('MAIL_PORT') ?: 465);
         $mail->CharSet = 'UTF-8';
+        $mail->SMTPDebug = 2;
+        $mail->Debugoutput = function ($str, $level) {
+            logApiError("PHPMailer debug [{$level}]: " . trim($str));
+        };
 
         $mail->setFrom($fromAddress, $fromName);
         $mail->addAddress($to);
@@ -79,9 +144,11 @@ if (!function_exists('mail_send_phpmailer')) {
         $mail->isHTML(true);
         $mail->Body = $html;
         $mail->AltBody = $text;
-        $mail->send();
-
-        return true;
+        $sent = $mail->send();
+        if (!$sent) {
+            logApiError('PHPMailer send returned false. ErrorInfo: ' . $mail->ErrorInfo);
+        }
+        return $sent;
     }
 }
 
@@ -111,15 +178,20 @@ if (!function_exists('send_configured_mail')) {
         $fromName = trim((string)(env('MAIL_FROM_NAME') ?: '365 Kuran Kuran Mektebi'));
         $replyTo = trim((string)($payload['replyTo'] ?? ($user['email'] ?? '')));
 
+        logApiError("send_configured_mail start: to={$to} subject={$subject}");
         $sent = false;
         try {
             $sent = mail_send_phpmailer($to, $subject, $html, $text, $replyTo, $fromAddress, $fromName);
         } catch (Throwable $e) {
+            logApiError('PHPMailer exception: ' . $e->getMessage());
             $sent = false;
         }
+        logApiError('PHPMailer result: ' . ($sent ? 'true' : 'false'));
 
         if (!$sent) {
+            logApiError('Falling back to native mail()');
             $sent = mail_send_native($to, $subject, $html, $text, $replyTo, $fromAddress, $fromName);
+            logApiError('Native mail result: ' . ($sent ? 'true' : 'false'));
         }
 
         if (!$sent) {

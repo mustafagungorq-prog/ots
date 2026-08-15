@@ -170,7 +170,7 @@ function getMonthName(key: string) {
 // ====== CLASSES PAGE ======
 export function ClassesPage() {
   const data = useStudentData();
-  const { users, canEdit, usersLoaded, refreshUsers } = useAuth();
+  const { users, canEdit, usersLoaded, refreshUsers, currentUser } = useAuth();
 
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -256,7 +256,14 @@ export function ClassesPage() {
           <Button
             onClick={() => {
               setEditing(null);
-              setForm({ active: true, lessonIds: [] });
+              setForm({
+                active: true,
+                lessonIds: [],
+                schoolId:
+                  currentUser?.role === "admin" && currentUser?.schoolId
+                    ? currentUser.schoolId
+                    : undefined,
+              });
               setOpen(true);
             }}
           >
@@ -988,6 +995,7 @@ export function ClassesPage() {
                   onValueChange={(v) =>
                     setForm({ ...form, schoolId: Number(v) })
                   }
+                  disabled={currentUser?.role === "admin"}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Okul seçin" />

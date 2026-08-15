@@ -13,8 +13,11 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(100) UNIQUE,
     phone VARCHAR(20),
     role ENUM('superadmin','admin','authorized_teacher','teacher','parent') NOT NULL DEFAULT 'teacher',
+    school_id INT,
     active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    approved BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Schools (Medreseler)
@@ -33,8 +36,10 @@ CREATE TABLE IF NOT EXISTS courses (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     description TEXT,
+    school_id INT,
     active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Course Schedules (Kurs Ders Planlari)
@@ -94,6 +99,7 @@ CREATE TABLE IF NOT EXISTS students (
     email VARCHAR(100),
     group_id INT,
     assigned_surveys JSON,
+    archived BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE SET NULL,
     FOREIGN KEY (group_id) REFERENCES class_rooms(id) ON DELETE SET NULL
@@ -280,7 +286,7 @@ CREATE TABLE IF NOT EXISTS memorization_tracking (
     id INT AUTO_INCREMENT PRIMARY KEY,
     student_id INT NOT NULL,
     text_id INT NOT NULL,
-    status ENUM('passed','failed','repeat_tecvid','repeat_harf') NOT NULL DEFAULT 'failed',
+    status ENUM('passed','failed','repeat_tecvid','repeat_harf','not_appointment','home_work') NOT NULL DEFAULT 'not_appointment',
     scores JSON,
     teacher_note TEXT,
     checked_by INT,
@@ -416,3 +422,83 @@ INSERT IGNORE INTO class_room_courses (class_room_id, course_id) VALUES
 INSERT IGNORE INTO schools (id, name, address, phone, principal_name, active, created_at) VALUES
 (1, 'Istanbul Imam Hatip Lisesi', 'Istanbul, Fatih', '0212-555-0001', 'Ahmet Yilmaz', TRUE, '2025-09-01'),
 (2, 'Ankara IHL', 'Ankara, Kecioren', '0312-555-0002', 'Mehmet Kaya', TRUE, '2025-09-01');
+
+-- Parent consent records (Veli aydınlatma ve KVKK onayları)
+CREATE TABLE IF NOT EXISTS parent_consents (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    illumination_consent BOOLEAN NOT NULL DEFAULT FALSE,
+    kvkk_consent BOOLEAN NOT NULL DEFAULT FALSE,
+    illumination_consented_at TIMESTAMP NULL,
+    kvkk_consented_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY unique_user_id (user_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Grid column permissions (Kolon yetkileri)
+CREATE TABLE IF NOT EXISTS grid_column_permissions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    grid_id VARCHAR(50) NOT NULL,
+    column_key VARCHAR(50) NOT NULL,
+    column_label VARCHAR(100) NOT NULL,
+    allowed_roles JSON NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_grid_column (grid_id, column_key),
+    INDEX idx_grid_id (grid_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Default grid column permissions seed
+INSERT IGNORE INTO grid_column_permissions (grid_id, column_key, column_label, allowed_roles) VALUES
+('students', 'firstName', 'Ad Soyad', '["superadmin","admin","authorized_teacher","teacher","parent"]'),
+('students', 'tcKimlik', 'TC Kimlik', '["superadmin"]'),
+('students', 'grade', 'Sinif', '["superadmin","admin","authorized_teacher","teacher","parent"]'),
+('students', 'school', 'Medrese', '["superadmin","admin","authorized_teacher"]'),
+('students', 'group', 'Grup', '["superadmin","admin","authorized_teacher","teacher"]'),
+('students', 'age', 'Yas', '["superadmin","admin","authorized_teacher","teacher","parent"]'),
+('students', 'city', 'Memleket', '["superadmin","admin","authorized_teacher","teacher","parent"]'),
+('students', 'lessons', 'Dersler', '["superadmin","admin","authorized_teacher","teacher"]'),
+('students', 'actions', 'Islem', '["superadmin","admin","authorized_teacher"]'),
+('schools', 'address', 'Adres', '["superadmin","admin"]'),
+('schools', 'phone', 'Telefon', '["superadmin","admin"]'),
+('schools', 'principal', 'Yetkili', '["superadmin","admin"]'),
+('schools', 'studentCount', 'Ogrenci Sayisi', '["superadmin","admin"]'),
+('schools', 'actions', 'Islem', '["superadmin","admin"]'),
+('lessons', 'name', 'Ders Adi', '["superadmin","admin","authorized_teacher"]'),
+('lessons', 'classRoom', 'Sinif', '["superadmin","admin","authorized_teacher"]'),
+('lessons', 'dayOfWeek', 'Gun', '["superadmin","admin","authorized_teacher"]'),
+('lessons', 'time', 'Saat', '["superadmin","admin","authorized_teacher"]'),
+('lessons', 'studentCount', 'Ogrenci Sayisi', '["superadmin","admin","authorized_teacher"]'),
+('lessons', 'actions', 'Islem', '["superadmin","admin"]'),
+('lessonStudents', 'firstName', 'Ad Soyad', '["superadmin","admin","authorized_teacher","teacher"]'),
+('lessonStudents', 'grade', 'Sinif', '["superadmin","admin","authorized_teacher","teacher"]'),
+('lessonStudents', 'school', 'Medrese', '["superadmin","admin","authorized_teacher","teacher"]'),
+('lessonStudents', 'parentName', 'Veli', '["superadmin","admin","authorized_teacher","teacher"]'),
+('lessonStudents', 'parentPhone', 'Veli Telefon', '["superadmin","admin","authorized_teacher","teacher"]'),
+('lessonStudents', 'phone', 'Ogrenci Telefon', '["superadmin","admin","authorized_teacher","teacher"]'),
+('attendance', 'date', 'Tarih', '["superadmin","admin","authorized_teacher","teacher"]'),
+('attendance', 'student', 'Ogrenci', '["superadmin","admin","authorized_teacher","teacher"]'),
+('attendance', 'status', 'Durum', '["superadmin","admin","authorized_teacher","teacher"]'),
+('attendance', 'notes', 'Not', '["superadmin","admin","authorized_teacher","teacher"]'),
+('attendance', 'actions', 'Islem', '["superadmin","admin","authorized_teacher","teacher"]'),
+('progress', 'date', 'Tarih', '["superadmin","admin","authorized_teacher","teacher"]'),
+('progress', 'student', 'Ogrenci', '["superadmin","admin","authorized_teacher","teacher"]'),
+('progress', 'kuran', 'Kuran', '["superadmin","admin","authorized_teacher","teacher"]'),
+('progress', 'risale', 'Risale', '["superadmin","admin","authorized_teacher","teacher"]'),
+('progress', 'elifba', 'Elifba', '["superadmin","admin","authorized_teacher","teacher"]'),
+('progress', 'notes', 'Not', '["superadmin","admin","authorized_teacher","teacher"]'),
+('progress', 'actions', 'Islem', '["superadmin","admin","authorized_teacher","teacher"]'),
+('comments', 'student', 'Ogrenci', '["superadmin","admin","authorized_teacher"]'),
+('comments', 'type', 'Tur', '["superadmin","admin","authorized_teacher"]'),
+('comments', 'author', 'Yazar', '["superadmin","admin","authorized_teacher"]'),
+('comments', 'date', 'Tarih', '["superadmin","admin","authorized_teacher"]'),
+('comments', 'content', 'Icerik', '["superadmin","admin","authorized_teacher"]'),
+('comments', 'actions', 'Islem', '["superadmin","admin","authorized_teacher"]'),
+('reports', 'date', 'Tarih', '["superadmin","admin","authorized_teacher"]'),
+('reports', 'student', 'Ogrenci', '["superadmin","admin","authorized_teacher"]'),
+('reports', 'type', 'Tur', '["superadmin","admin","authorized_teacher"]'),
+('reports', 'method', 'Yontem', '["superadmin","admin","authorized_teacher"]'),
+('reports', 'status', 'Durum', '["superadmin","admin","authorized_teacher"]'),
+('reports', 'actions', 'Islem', '["superadmin","admin","authorized_teacher"]');

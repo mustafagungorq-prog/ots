@@ -190,14 +190,7 @@ function getMonthName(key: string) {
 export function ProgressPage() {
   const data = useStudentData();
   const navigate = useNavigate();
-  const {
-    canViewColumn,
-    currentUser,
-    teacherLessons,
-    canEdit,
-    teacherLessonsLoaded,
-    refreshTeacherLessons,
-  } = useAuth();
+  const { canViewColumn, currentUser, canEdit } = useAuth();
 
   useEffect(() => {
     data.loadStudents();
@@ -212,54 +205,26 @@ export function ProgressPage() {
     data.loadMemorizationTexts();
     data.loadMemorizationTracking();
     data.loadCurriculumTopics();
-    refreshTeacherLessons();
     apiGet<{ value?: string }>("system-settings/sub_topic_required")
-      .then((d) => setSubTopicRequired(String(d.value).toLowerCase() === "true"))
+      .then((d) =>
+        setSubTopicRequired(String(d.value).toLowerCase() === "true"),
+      )
       .catch(() => setSubTopicRequired(false));
   }, []);
 
   const isTeacher =
     currentUser?.role === "teacher" ||
     currentUser?.role === "authorized_teacher";
-  // Ogretmenin atanmis dersleri - dogrudan teacherLessons state'inden oku
+  // Teachers can access all courses in their school; show all school students.
   const myLessonIds =
-    isTeacher && currentUser
-      ? teacherLessons
-          .filter((a) => a.teacherId === currentUser.id)
-          .map((a) => a.lessonId)
-      : [];
-  // Ogretmenin atanmis gruplari
+    isTeacher && currentUser ? data.lessons.map((l) => l.id) : [];
   const myGroupIds =
     isTeacher && currentUser
       ? data.classRooms
           .filter((r) => r.teacherIds.includes(currentUser.id))
           .map((r) => r.id)
       : [];
-  const myStudents =
-    isTeacher && currentUser
-      ? (() => {
-          // Derse atanmis ogrenciler
-          const lessonStudents =
-            myLessonIds.length > 0
-              ? data.students.filter((s) =>
-                  s.lessons.some((lid: number) => myLessonIds.includes(lid)),
-                )
-              : [];
-          // Grupla atanmis ogrenciler
-          const groupStudents =
-            myGroupIds.length > 0
-              ? data.students.filter((s) =>
-                  myGroupIds.includes(s.groupId || -1),
-                )
-              : [];
-          // Birlestir, tekrarlari kaldir
-          const combined = [...lessonStudents, ...groupStudents];
-          const unique = combined.filter(
-            (s, i, arr) => arr.findIndex((x) => x.id === s.id) === i,
-          );
-          return unique;
-        })()
-      : data.students;
+  const myStudents = data.students;
 
   const PROGRESS_FILTERS_KEY = "ots_progress_filters";
   const savedFilters = (() => {
@@ -293,14 +258,19 @@ export function ProgressPage() {
     }
   }, [activeView]);
 
-  const [selCourse, setSelCourse] = useState<string>(savedFilters.selCourse ?? "");
-  const [selLesson, setSelLesson] = useState<string>(savedFilters.selLesson ?? "");
+  const [selCourse, setSelCourse] = useState<string>(
+    savedFilters.selCourse ?? "",
+  );
+  const [selLesson, setSelLesson] = useState<string>(
+    savedFilters.selLesson ?? "",
+  );
   const [trackingCourse, setTrackingCourse] = useState<string>("");
+  const [trackingGroup, setTrackingGroup] = useState<string>("all");
   const [trackingSearch, setTrackingSearch] = useState<string>("");
   const [trackingStudentId, setTrackingStudentId] = useState<string>("");
-  const [trackingSubTab, setTrackingSubTab] = useState<"homework" | "memorization">(
-    "homework",
-  );
+  const [trackingSubTab, setTrackingSubTab] = useState<
+    "homework" | "memorization"
+  >("homework");
   const [progDate, setProgDate] = useState<string>(
     savedFilters.progDate || new Date().toISOString().split("T")[0],
   );
@@ -522,11 +492,19 @@ export function ProgressPage() {
     });
   }, [data.progress, data.students, recordsSearch]);
 
+  useEffect(() => {
+    setTrackingGroup("all");
+  }, [trackingCourse]);
+
   const trackingStudents = useMemo(() => {
     let list = myStudents;
     if (trackingCourse && trackingCourse !== "all") {
       const courseId = Number(trackingCourse);
       list = list.filter((s) => s.lessons.includes(courseId));
+    }
+    if (trackingGroup && trackingGroup !== "all") {
+      const groupId = Number(trackingGroup);
+      list = list.filter((s) => s.groupId === groupId);
     }
     const term = trackingSearch.trim().toLowerCase();
     if (term) {
@@ -540,7 +518,7 @@ export function ProgressPage() {
         "tr",
       ),
     );
-  }, [myStudents, trackingCourse, trackingSearch]);
+  }, [myStudents, trackingCourse, trackingGroup, trackingSearch]);
 
   // Filtre secenekleri
   const gradeOptions = useMemo(
@@ -701,30 +679,28 @@ export function ProgressPage() {
           d.ec !== undefined ||
           d.note !== undefined);
       if (hasChange) {
-        data.addProgress({
+        let dataToSave = {
           studentId: s.id,
           date: progDate,
           kuranPages:
-            d?.kp !== undefined ? Number(d.kp) || 0 : lp?.kuranPages || 0,
+            d.kp || 0,
           kuranCurrentPage:
-            d?.kc !== undefined
-              ? Number(d.kc) || 0
-              : lp?.kuranCurrentPage || 0,
+            lp?.kuranCurrentPage == undefined ? 0 : Number(lp?.kuranCurrentPage) + Number(d.kp == undefined ? 0 : d.kp),
           risalePages:
-            d?.rp !== undefined ? Number(d.rp) || 0 : lp?.risalePages || 0,
+            d.rp || 0,
           risaleCurrentPage:
-            d?.rc !== undefined
-              ? Number(d.rc) || 0
-              : lp?.risaleCurrentPage || 0,
+            lp?.risaleCurrentPage == undefined ? 0 : Number(lp?.risaleCurrentPage) + Number(d.rp == undefined ? 0 : d.rp),
           elifbaCurrentPage:
             d?.ec !== undefined
               ? Number(d.ec) || 0
               : lp?.elifbaCurrentPage || 0,
           notes: d?.note !== undefined ? d.note : lp?.notes || "",
-        });
+        };
+        data.addProgress(dataToSave);
         count++;
       }
     });
+    
     setSaved(true);
     alert(`${count} öğrencinin gelişimi kaydedildi`);
   };
@@ -795,8 +771,7 @@ export function ProgressPage() {
   if (
     data.loadingStudents || data.loadingClassRooms || data.loadingLessons ||
     data.loadingSchools || data.loadingProgress || data.loadingAttendance ||
-    data.loadingHomeworkTemplates || data.loadingCurriculumTopics ||
-    !teacherLessonsLoaded
+    data.loadingHomeworkTemplates || data.loadingCurriculumTopics
   ) {
     return <Loading />;
   }*/
@@ -1103,9 +1078,7 @@ export function ProgressPage() {
                         <TableCell className="font-medium text-sm">
                           <Link
                             to={`/student-profile/${s.id}`}
-                            target={
-                              openProfileInNewTab ? "_blank" : undefined
-                            }
+                            target={openProfileInNewTab ? "_blank" : undefined}
                             rel={
                               openProfileInNewTab
                                 ? "noopener noreferrer"
@@ -1690,29 +1663,29 @@ export function ProgressPage() {
                     <div className="space-y-1">
                       <Label className="text-xs">Kategori *</Label>
                       <div className="grid grid-cols-4 gap-2">
-                        {(
-                          ["ilmihal", "adab", "tecvid", "diger"] as const
-                        ).map((cat) => (
-                          <button
-                            key={cat}
-                            type="button"
-                            onClick={() => {
-                              setSelectedLessonCategory(cat);
-                              setSelectedLessonTopicId("");
-                              setSelectedLessonSubTopic("");
-                              setSelectedLessonOtherText("");
-                            }}
-                            className={`p-3 rounded-lg border text-center transition-colors ${selectedLessonCategory === cat ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:bg-gray-50"}`}
-                          >
-                            <GraduationCap
-                              size={18}
-                              className={`mx-auto mb-1 ${selectedLessonCategory === cat ? "text-emerald-600" : "text-gray-400"}`}
-                            />
-                            <span className="text-xs font-medium">
-                              {cat === "diger" ? "Diğer" : cat}
-                            </span>
-                          </button>
-                        ))}
+                        {(["ilmihal", "adab", "tecvid", "diger"] as const).map(
+                          (cat) => (
+                            <button
+                              key={cat}
+                              type="button"
+                              onClick={() => {
+                                setSelectedLessonCategory(cat);
+                                setSelectedLessonTopicId("");
+                                setSelectedLessonSubTopic("");
+                                setSelectedLessonOtherText("");
+                              }}
+                              className={`p-3 rounded-lg border text-center transition-colors ${selectedLessonCategory === cat ? "border-emerald-500 bg-emerald-50" : "border-gray-200 hover:bg-gray-50"}`}
+                            >
+                              <GraduationCap
+                                size={18}
+                                className={`mx-auto mb-1 ${selectedLessonCategory === cat ? "text-emerald-600" : "text-gray-400"}`}
+                              />
+                              <span className="text-xs font-medium">
+                                {cat === "diger" ? "Diğer" : cat}
+                              </span>
+                            </button>
+                          ),
+                        )}
                       </div>
                     </div>
                     {/* Konu */}
@@ -1757,7 +1730,9 @@ export function ProgressPage() {
                     {/* Alt Konu */}
                     {selectedTopic && selectedLessonCategory !== "diger" && (
                       <div className="space-y-1">
-                        <Label className="text-xs">Alt Konu {subTopicRequired ? "*" : "(opsiyonel)"}</Label>
+                        <Label className="text-xs">
+                          Alt Konu {subTopicRequired ? "*" : "(opsiyonel)"}
+                        </Label>
                         <div className="grid grid-cols-1 gap-2 max-h-40 overflow-y-auto">
                           {selectedTopic.subTopics.map((st: string) => (
                             <button
@@ -1973,27 +1948,52 @@ export function ProgressPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Kurs</Label>
-                <Select
-                  value={trackingCourse}
-                  onValueChange={(v) => {
-                    setTrackingCourse(v);
-                    setTrackingStudentId("");
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Kurs seçin" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Tüm Kurslar</SelectItem>
-                    {data.lessons.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Kurs</Label>
+                  <Select
+                    value={trackingCourse}
+                    onValueChange={(v) => {
+                      setTrackingCourse(v);
+                      setTrackingStudentId("");
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Kurs seçin" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tüm Kurslar</SelectItem>
+                      {data.lessons.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-xs">Grup</Label>
+                  <Select
+                    value={trackingGroup}
+                    onValueChange={(v) => {
+                      setTrackingGroup(v);
+                      setTrackingStudentId("");
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Grup seçin" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tüm Gruplar</SelectItem>
+                      {data.classRooms.map((g) => (
+                        <SelectItem key={g.id} value={String(g.id)}>
+                          {g.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div className="space-y-1">
@@ -2005,30 +2005,45 @@ export function ProgressPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {trackingStudents.map((s) => (
-                  <Card
-                    key={s.id}
-                    className={`cursor-pointer transition-colors ${
-                      String(s.id) === trackingStudentId
-                        ? "border-emerald-500 bg-emerald-50"
-                        : "hover:bg-gray-50"
-                    }`}
-                    onClick={() => setTrackingStudentId(String(s.id))}
-                  >
-                    <CardContent className="p-3">
-                      <p className="font-medium text-sm">
-                        {s.firstName} {s.lastName}
-                      </p>
-                      <p className="text-xs text-gray-500">{s.grade}</p>
-                    </CardContent>
-                  </Card>
-                ))}
-                {trackingStudents.length === 0 && (
-                  <p className="text-sm text-gray-500 col-span-full">
-                    Eşleşen öğrenci bulunamadı.
-                  </p>
-                )}
+              <div className="rounded-md border overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Öğrenci</TableHead>
+                      <TableHead className="text-xs">Sınıf</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {trackingStudents.map((s) => (
+                      <TableRow
+                        key={s.id}
+                        className={`cursor-pointer ${
+                          String(s.id) === trackingStudentId
+                            ? "bg-emerald-50"
+                            : "hover:bg-gray-50"
+                        }`}
+                        onClick={() => setTrackingStudentId(String(s.id))}
+                      >
+                        <TableCell className="font-medium text-sm">
+                          {s.firstName} {s.lastName}
+                        </TableCell>
+                        <TableCell className="text-xs text-gray-500">
+                          {s.grade}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {trackingStudents.length === 0 && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={2}
+                          className="text-center py-4 text-sm text-gray-500"
+                        >
+                          Eşleşen öğrenci bulunamadı.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
               </div>
             </CardContent>
           </Card>
@@ -2061,9 +2076,7 @@ export function ProgressPage() {
               </CardHeader>
               <CardContent>
                 {trackingSubTab === "homework" && (
-                  <StudentHomeworkPanel
-                    studentId={Number(trackingStudentId)}
-                  />
+                  <StudentHomeworkPanel studentId={Number(trackingStudentId)} />
                 )}
                 {trackingSubTab === "memorization" && (
                   <StudentMemorizationGridPanel

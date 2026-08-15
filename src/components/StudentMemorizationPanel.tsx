@@ -20,6 +20,8 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "Kaldı",
   repeat_tecvid: "Tekrarlamalı (Tecvid)",
   repeat_harf: "Tekrarlamalı (Harf)",
+  not_appointment: "Atanmadı",
+  home_work: "Ev Ödevi",
 };
 
 const STATUS_BADGES: Record<string, string> = {
@@ -27,6 +29,8 @@ const STATUS_BADGES: Record<string, string> = {
   failed: "bg-red-500",
   repeat_tecvid: "bg-amber-500",
   repeat_harf: "bg-blue-500",
+  not_appointment: "bg-gray-500",
+  home_work: "bg-purple-500",
 };
 
 export function StudentMemorizationPanel({

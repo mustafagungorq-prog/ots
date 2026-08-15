@@ -29,6 +29,8 @@ const STATUS_OPTIONS: MemorizationStatus[] = [
   "failed",
   "repeat_tecvid",
   "repeat_harf",
+  "not_appointment",
+  "home_work",
 ];
 
 const STATUS_LABELS: Record<MemorizationStatus, string> = {
@@ -36,6 +38,8 @@ const STATUS_LABELS: Record<MemorizationStatus, string> = {
   failed: "Kaldı",
   repeat_tecvid: "Tekrarlamalı (Tecvid)",
   repeat_harf: "Tekrarlamalı (Harf)",
+  not_appointment: "Atanmadı",
+  home_work: "Ev Ödevi",
 };
 
 const STATUS_BADGES: Record<MemorizationStatus, string> = {
@@ -43,6 +47,8 @@ const STATUS_BADGES: Record<MemorizationStatus, string> = {
   failed: "bg-red-500",
   repeat_tecvid: "bg-amber-500",
   repeat_harf: "bg-blue-500",
+  not_appointment: "bg-gray-500",
+  home_work: "bg-purple-500",
 };
 
 type LocalRow = {
@@ -64,6 +70,7 @@ export function StudentMemorizationGridPanel({
   );
   const [memorizationMode, setMemorizationMode] =
     useState<MemorizationMode>("simple");
+  const [textSearch, setTextSearch] = useState("");
 
   const student = useMemo(
     () => data.students.find((s) => s.id === studentId),
@@ -77,6 +84,14 @@ export function StudentMemorizationGridPanel({
         .sort((a, b) => a.sortOrder - b.sortOrder),
     [data.memorizationCriteria],
   );
+
+  const filteredTexts = useMemo(() => {
+    const q = textSearch.trim().toLowerCase();
+    if (!q) return data.memorizationTexts;
+    return data.memorizationTexts.filter((t) =>
+      t.title.toLowerCase().includes(q),
+    );
+  }, [data.memorizationTexts, textSearch]);
 
   useEffect(() => {
     apiGet<{ value?: string }>("system-settings/memorization_mode")
@@ -103,7 +118,7 @@ export function StudentMemorizationGridPanel({
     data.memorizationTexts.forEach((t) => {
       if (!map[t.id]) {
         map[t.id] = {
-          status: "failed",
+          status: "not_appointment",
           teacherNote: "",
           scores: {},
         };
@@ -141,7 +156,7 @@ export function StudentMemorizationGridPanel({
     setLocalStatuses((prev) => ({
       ...prev,
       [textId]: {
-        ...(prev[textId] || { status: "failed" as MemorizationStatus, scores: {} }),
+        ...(prev[textId] || { status: "not_appointment" as MemorizationStatus, scores: {} }),
         teacherNote,
       },
     }));
@@ -150,7 +165,7 @@ export function StudentMemorizationGridPanel({
   const updateScore = (textId: number, code: string, value: number) => {
     setLocalStatuses((prev) => {
       const row = prev[textId] || {
-        status: "failed" as MemorizationStatus,
+        status: "not_appointment" as MemorizationStatus,
         teacherNote: "",
         scores: {},
       };
@@ -178,19 +193,26 @@ export function StudentMemorizationGridPanel({
     );
   };
 
-  const saveAll = () => {
-    data.memorizationTexts.forEach((text) => {
-      const row = localStatuses[text.id];
-      if (row) {
-        data.setMemorizationStatus(
-          studentId,
-          text.id,
-          row.status,
-          row.teacherNote,
-          memorizationMode === "simple" ? undefined : row.scores,
-        );
-      }
-    });
+  const saveAll = async () => {
+    const items = data.memorizationTexts
+      .map((text) => {
+        const row = localStatuses[text.id];
+        if (!row) return null;
+        return {
+          textId: text.id,
+          status: row.status,
+          teacherNote: row.teacherNote,
+          scores: memorizationMode === "simple" ? undefined : row.scores,
+        };
+      })
+      .filter(Boolean) as {
+      textId: number;
+      status: MemorizationStatus;
+      teacherNote?: string;
+      scores?: Record<string, number>;
+    }[];
+    if (items.length === 0) return;
+    await data.setMemorizationStatusesBatch(studentId, items);
   };
 
   if (!student) {
@@ -229,9 +251,26 @@ export function StudentMemorizationGridPanel({
         </Card>
       )}
 
+      {data.memorizationTexts.length > 0 && filteredTexts.length === 0 && (
+        <Card>
+          <CardContent className="p-8 text-center text-gray-500">
+            <ListChecks size={40} className="mx-auto mb-3 opacity-50" />
+            Aramaya uygun ezber metni bulunamadı.
+          </CardContent>
+        </Card>
+      )}
+
       {data.memorizationTexts.length > 0 && (
         <Card>
-          <CardContent className="p-0 overflow-x-auto">
+          <CardContent className="p-3 space-y-3 overflow-x-auto">
+            <div className="space-y-1">
+              <Label className="text-xs">Metin Ara</Label>
+              <Input
+                value={textSearch}
+                onChange={(e) => setTextSearch(e.target.value)}
+                placeholder="Ezber metni başlığı ara"
+              />
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -245,9 +284,9 @@ export function StudentMemorizationGridPanel({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.memorizationTexts.map((text) => {
+                {filteredTexts.map((text) => {
                   const row = localStatuses[text.id] || {
-                    status: "failed" as MemorizationStatus,
+                    status: "not_appointment" as MemorizationStatus,
                     teacherNote: "",
                     scores: {},
                   };
@@ -353,6 +392,16 @@ export function StudentMemorizationGridPanel({
                     </TableRow>
                   );
                 })}
+                {filteredTexts.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={memorizationMode === "simple" ? 4 : 5}
+                      className="text-center py-6 text-sm text-gray-500"
+                    >
+                      Aramaya uygun ezber metni bulunamadı.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </CardContent>

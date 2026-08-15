@@ -17,12 +17,14 @@ import { SchoolsPage } from "./app/pages/SchoolsPage";
 import { ClassesPage } from "./app/pages/ClassesPage";
 import { LessonsPage } from "./app/pages/LessonsPage";
 import { AttendancePage } from "./app/pages/AttendancePage";
-import { TeacherLessonsPage } from "./app/pages/TeacherLessonsPage";
+
 import { ProgressPage } from "./app/pages/ProgressPage";
 import { CommentsPage } from "./app/pages/CommentsPage";
 import { ReportsPage } from "./app/pages/ReportsPage";
+import { BulkReportMailPage } from "./app/pages/BulkReportMailPage";
 import { PermissionsPage } from "./app/pages/PermissionsPage";
 import { UsersPage } from "./app/pages/UsersPage";
+import { PendingApprovalsPage } from "./app/pages/PendingApprovalsPage";
 import { SurveyManagementPage } from "./app/pages/SurveyManagementPage";
 import { StudentProfilePage } from "./app/pages/StudentProfilePage";
 import { HomeworkTemplatesPage } from "./app/pages/HomeworkTemplatesPage";
@@ -31,12 +33,14 @@ import { MemorizationTrackingPage } from "./app/pages/MemorizationTrackingPage";
 import { MemorizationTextsAdminPage } from "./app/pages/MemorizationTextsAdminPage";
 import { ParentStudentLinksPage } from "./app/pages/ParentStudentLinksPage";
 import { ParentStudentsPage } from "./app/pages/ParentStudentsPage";
+import { ParentConsentPage } from "./app/pages/ParentConsentPage";
+import { ArchivedStudentsPage } from "./app/pages/ArchivedStudentsPage";
 
 const routeConfig = [
   {
     path: "/students",
     component: StudentsPage,
-    roles: ["superadmin", "admin", "authorized_teacher"],
+    roles: ["superadmin", "admin"],
   },
   {
     path: "/student-form",
@@ -54,7 +58,7 @@ const routeConfig = [
     roles: PERMISSIONS.SCHOOL_MANAGE,
   },
   {
-    path: "/lessons",
+    path: "/courses",
     component: LessonsPage,
     roles: PERMISSIONS.LESSON_MANAGE,
   },
@@ -73,11 +77,7 @@ const routeConfig = [
     component: ProgressPage,
     roles: PERMISSIONS.PROGRESS_CREATE,
   },
-  {
-    path: "/teacher-lessons",
-    component: TeacherLessonsPage,
-    roles: ["superadmin"],
-  },
+
   {
     path: "/comments",
     component: CommentsPage,
@@ -89,6 +89,11 @@ const routeConfig = [
     roles: PERMISSIONS.REPORT_CREATE,
   },
   {
+    path: "/bulk-report-mail",
+    component: BulkReportMailPage,
+    roles: ["superadmin", "admin", "authorized_teacher", "teacher"] as const,
+  },
+  {
     path: "/permissions",
     component: PermissionsPage,
     roles: PERMISSIONS.PERMISSION_MANAGE,
@@ -97,6 +102,11 @@ const routeConfig = [
     path: "/users",
     component: UsersPage,
     roles: PERMISSIONS.USER_MANAGE,
+  },
+  {
+    path: "/pending-approvals",
+    component: PendingApprovalsPage,
+    roles: ["superadmin"] as const,
   },
   {
     path: "/surveys",
@@ -134,6 +144,16 @@ const routeConfig = [
     roles: ["parent"],
   },
   {
+    path: "/archived-students",
+    component: ArchivedStudentsPage,
+    roles: ["superadmin", "admin", "authorized_teacher"],
+  },
+  {
+    path: "/parent-consent",
+    component: ParentConsentPage,
+    roles: ["parent"],
+  },
+  {
     path: "/student-profile/:id",
     component: StudentProfilePage,
     roles: [
@@ -157,30 +177,20 @@ function AppRouter() {
     const role = currentUser.role;
 
     if (role === "parent" && location.pathname === "/") {
+      navigate("/parent-consent", { replace: true });
+    }
+
+    // Keep old multi-student fallback for completeness (now routed through consent)
+    if (role === "parent" && location.pathname === "/parent-consent") {
       const linkedIds = currentUser.linkedStudentIds || [];
-      if (linkedIds.length === 1) {
-        navigate(`/student-profile/${linkedIds[0]}`, { replace: true });
-      } else {
+      if (linkedIds.length === 0) {
         navigate("/parent-students", { replace: true });
       }
 
       return;
     }
 
-    if (role === "teacher") {
-      if (
-        !location.pathname.startsWith("/progress") &&
-        !location.pathname.startsWith("/student-profile")
-      ) {
-        navigate("/progress", { replace: true });
-      }
-
-      return;
-    }
-
-    if (role === "authorized_teacher" && location.pathname === "/") {
-      navigate("/progress", { replace: true });
-    }
+    // Authorized teachers and teachers can navigate freely between allowed routes.
   }, [currentUser, location.pathname, navigate]);
 
   if (!currentUser) {
@@ -199,18 +209,13 @@ function AppRouter() {
           path="/"
           element={
             currentUser.role === "superadmin" ||
-            currentUser.role === "admin" ? (
+            currentUser.role === "admin" ||
+            currentUser.role === "authorized_teacher" ? (
               <DashboardPage />
-            ) : currentUser.role === "authorized_teacher" ||
-              currentUser.role === "teacher" ? (
+            ) : currentUser.role === "teacher" ? (
               <Navigate to="/progress" replace />
             ) : currentUser.role === "parent" ? (
-              <Navigate
-                to={`/student-profile/${
-                  currentUser.linkedStudentIds?.[0] ?? 0
-                }`}
-                replace
-              />
+              <Navigate to="/parent-consent" replace />
             ) : (
               <Navigate to="/students" replace />
             )
