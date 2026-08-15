@@ -1,0 +1,19 @@
+# Block direct access to sensitive files
+<Files .env>
+    Require all denied
+</Files>
+
+<Files ~ "^\.">
+    Require all denied
+</Files>
+
+# Also block common sensitive patterns (logs, config backups)
+<FilesMatch "\.(log|sql|bak|old|swp)$">
+    Require all denied
+</FilesMatch>
+
+# Deny access to api logs directory
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^api/logs/ - [F,L]
+</IfModule>
